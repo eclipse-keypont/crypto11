@@ -1,9 +1,9 @@
 module github.com/ThalesGroup/crypto11
 
-go 1.25.1
+go 1.25.8
 
 require (
-	github.com/miekg/pkcs11 v1.1.1
+	github.com/miekg/pkcs11 v1.1.2
 	github.com/pkg/errors v0.9.1
 	github.com/stretchr/testify v1.11.1
 	github.com/thales-e-security/pool v0.0.2
