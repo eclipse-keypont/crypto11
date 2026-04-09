@@ -1,4 +1,4 @@
-// Copyright 2024 Thales Group
+// Copyright 2026 Thales Group
 //
 // Permission is hereby granted, free of charge, to any person obtaining
 // a copy of this software and associated documentation files (the
@@ -166,6 +166,13 @@ const (
 	CkaDefaultCmsAttributes   = AttributeType(0x00000502)
 	CkaSupportedCmsAttributes = AttributeType(0x00000503)
 	CkaAllowedMechanisms      = ckfArrayAttribute | AttributeType(0x00000600)
+
+	/* new for v3.2 (PKCS#11 v3.2, KEM / post-quantum) */
+	CkaParameterSet        = AttributeType(0x0000061d)
+	CkaEncapsulateTemplate = AttributeType(0x0000062a)
+	CkaDecapsulateTemplate = AttributeType(0x0000062b)
+	CkaEncapsulate         = AttributeType(0x00000633)
+	CkaDecapsulate         = AttributeType(0x00000634)
 )
 
 // NewAttribute is a helper function that populates a new Attribute for common data types. This function will
@@ -525,6 +532,18 @@ func attributeTypeString(a AttributeType) string {
 		return "CkaSupportedCmsAttributes"
 	case CkaAllowedMechanisms:
 		return "CkaAllowedMechanisms"
+
+	case CkaParameterSet:
+		return "CkaParameterSet"
+	case CkaEncapsulateTemplate:
+		return "CkaEncapsulateTemplate"
+	case CkaDecapsulateTemplate:
+		return "CkaDecapsulateTemplate"
+	case CkaEncapsulate:
+		return "CkaEncapsulate"
+	case CkaDecapsulate:
+		return "CkaDecapsulate"
+
 	default:
 		return "Unknown"
 	}

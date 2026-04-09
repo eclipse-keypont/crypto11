@@ -18,4 +18,4 @@ require (
 // TODO(temporary): local replace for PKCS#11 v3.2 / ML-KEM support (github.com/Nicolas-Peiffer/pkcs11
 // fork). Remove once upstream github.com/miekg/pkcs11 merges these changes, or once the fork's
 // go.mod is updated to declare "module github.com/Nicolas-Peiffer/pkcs11".
-replace github.com/miekg/pkcs11 => ../pkcs11.github.com.miekg
+replace github.com/miekg/pkcs11 v1.1.2 => ../pkcs11.github.com.miekg
