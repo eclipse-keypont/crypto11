@@ -191,7 +191,7 @@ func NewAttribute(attributeType AttributeType, value interface{}) (a *Attribute,
 // CopyAttribute returns a deep copy of the given Attribute.
 func CopyAttribute(a *Attribute) *Attribute {
 	var value []byte
-	if a.Value != nil && len(a.Value) > 0 {
+	if len(a.Value) > 0 {
 		value = append([]byte(nil), a.Value...)
 	}
 	return &pkcs11.Attribute{
