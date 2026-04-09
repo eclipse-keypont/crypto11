@@ -22,7 +22,6 @@
 package crypto11
 
 import (
-	"errors"
 	"fmt"
 	"strings"
 
@@ -35,7 +34,7 @@ type AttributeType = uint
 // Attribute represents a PKCS#11 CK_ATTRIBUTE type.
 type Attribute = pkcs11.Attribute
 
-//noinspection GoUnusedConst,GoDeprecation
+// noinspection GoUnusedConst,GoDeprecation
 const (
 	CkaClass                  = AttributeType(0x00000000)
 	CkaToken                  = AttributeType(0x00000001)
@@ -181,7 +180,7 @@ func NewAttribute(attributeType AttributeType, value interface{}) (a *Attribute,
 	// catch any panics from the pkcs11.NewAttribute() call to keyHandle the error cleanly
 	defer func() {
 		if r := recover(); r != nil {
-			err = errors.New(fmt.Sprintf("failed creating Attribute: %v", r))
+			err = fmt.Errorf("failed creating Attribute: %v", r)
 		}
 	}()
 
