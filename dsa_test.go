@@ -177,7 +177,7 @@ func testDsaSigningWithHash(t *testing.T, key crypto.Signer, hashFunction crypto
 	err = sig.unmarshalDER(sigDER)
 	require.NoError(t, err)
 
-	dsaPubkey := key.Public().(crypto.PublicKey).(*dsa.PublicKey)
+	dsaPubkey := key.Public().(*dsa.PublicKey)
 	if !dsa.Verify(dsaPubkey, plaintextHash, sig.R, sig.S) {
 		t.Errorf("DSA %s Verify failed (psize %d hash %v)", what, psize, hashFunction)
 	}
