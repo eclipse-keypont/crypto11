@@ -104,7 +104,7 @@ func TestNativeDSA(t *testing.T) {
 func TestHardDSA(t *testing.T) {
 	skipTest(t, skipTestDSA)
 
-	ctx, err := ConfigureFromFile("config")
+	ctx, err := ConfigureFromFile("crypto11.config.json")
 	require.NoError(t, err)
 
 	defer func() {
@@ -187,7 +187,7 @@ func testDsaSigningWithHash(t *testing.T, key crypto.Signer, hashFunction crypto
 }
 
 func TestDsaRequiredArgs(t *testing.T) {
-	ctx, err := ConfigureFromFile("config")
+	ctx, err := ConfigureFromFile("crypto11.config.json")
 	require.NoError(t, err)
 
 	defer func() {

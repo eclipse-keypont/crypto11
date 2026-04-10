@@ -39,7 +39,7 @@ import (
 
 func TestKeysPersistAcrossContexts(t *testing.T) {
 	// Verify that close and re-open works.
-	ctx, err := ConfigureFromFile("config")
+	ctx, err := ConfigureFromFile("crypto11.config.json")
 	require.NoError(t, err)
 
 	id := randomBytes()
@@ -51,7 +51,7 @@ func TestKeysPersistAcrossContexts(t *testing.T) {
 
 	require.NoError(t, ctx.Close())
 
-	ctx, err = ConfigureFromFile("config")
+	ctx, err = ConfigureFromFile("crypto11.config.json")
 	require.NoError(t, err)
 
 	key2, err := ctx.FindKeyPair(id, nil)
@@ -63,7 +63,7 @@ func TestKeysPersistAcrossContexts(t *testing.T) {
 }
 
 func configureWithPin(t *testing.T) (*Context, error) {
-	cfg, err := getConfig("config")
+	cfg, err := getConfig("crypto11.config.json")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -101,7 +101,7 @@ func getConfig(configLocation string) (ctx *Config, err error) {
 }
 
 func TestKeyPairDelete(t *testing.T) {
-	ctx, err := ConfigureFromFile("config")
+	ctx, err := ConfigureFromFile("crypto11.config.json")
 	require.NoError(t, err)
 
 	defer func() {
@@ -125,7 +125,7 @@ func TestKeyPairDelete(t *testing.T) {
 }
 
 func TestKeyDelete(t *testing.T) {
-	ctx, err := ConfigureFromFile("config")
+	ctx, err := ConfigureFromFile("crypto11.config.json")
 	require.NoError(t, err)
 
 	defer func() {
@@ -182,7 +182,7 @@ func TestAmbiguousTokenConfig(t *testing.T) {
 }
 
 func TestSelectBySlot(t *testing.T) {
-	config, err := loadConfigFromFile("config")
+	config, err := loadConfigFromFile("crypto11.config.json")
 	require.NoError(t, err)
 
 	// Look up slot number for label
@@ -211,7 +211,7 @@ func TestSelectBySlot(t *testing.T) {
 }
 
 func TestSelectByNonExistingSlot(t *testing.T) {
-	config, err := loadConfigFromFile("config")
+	config, err := loadConfigFromFile("crypto11.config.json")
 	require.NoError(t, err)
 
 	rand.Seed(time.Now().UnixNano())
@@ -227,10 +227,10 @@ func TestSelectByNonExistingSlot(t *testing.T) {
 }
 
 func TestAccessSameLibraryTwice(t *testing.T) {
-	ctx1, err := ConfigureFromFile("config")
+	ctx1, err := ConfigureFromFile("crypto11.config.json")
 	require.NoError(t, err)
 
-	ctx2, err := ConfigureFromFile("config")
+	ctx2, err := ConfigureFromFile("crypto11.config.json")
 	require.NoError(t, err)
 
 	// Close the first context, which shouldn't render the second
@@ -247,7 +247,7 @@ func TestAccessSameLibraryTwice(t *testing.T) {
 	require.NoError(t, err)
 
 	// Check we can open this again and use it without error
-	ctx3, err := ConfigureFromFile("config")
+	ctx3, err := ConfigureFromFile("crypto11.config.json")
 	require.NoError(t, err)
 
 	// Try to find a non-existant key. We are just checking that we can
@@ -266,7 +266,7 @@ func TestNoLogin(t *testing.T) {
 	// Note: PKCS#11 login state is per-slot. If any other context has already
 	// logged into this slot, new sessions inherit the logged-in state and this
 	// test cannot be run reliably. In that case we clean up and skip.
-	cfg, err := getConfig("config")
+	cfg, err := getConfig("crypto11.config.json")
 	require.NoError(t, err)
 	cfg.LoginNotSupported = true
 
@@ -294,11 +294,11 @@ func TestInvalidPinDoesntDestroyLibrary(t *testing.T) {
 	// each has its own independent PKCS#11 slot login state.
 	// They are created automatically when SOFTHSM3_MODULE is set (see setup_test.go).
 	// In manual-setup environments without those tokens, we skip gracefully.
-	cfg, err := getConfig("config")
+	cfg, err := getConfig("crypto11.config.json")
 	require.NoError(t, err)
 	cfg.TokenLabel = "token1"
 
-	cfgWrongPin, err := getConfig("config")
+	cfgWrongPin, err := getConfig("crypto11.config.json")
 	require.NoError(t, err)
 	cfgWrongPin.Pin = "this_should_be_wrong_pin"
 	cfgWrongPin.TokenLabel = "token2"
@@ -326,7 +326,7 @@ func TestInvalidPinDoesntDestroyLibrary(t *testing.T) {
 }
 
 func TestInvalidMaxSessions(t *testing.T) {
-	cfg, err := getConfig("config")
+	cfg, err := getConfig("crypto11.config.json")
 	require.NoError(t, err)
 
 	cfg.MaxSessions = 1

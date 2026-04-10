@@ -13,7 +13,7 @@ import (
 
 // withContext executes a test function with a context.
 func withContext(t *testing.T, f func(ctx *Context)) {
-	ctx, err := ConfigureFromFile("config")
+	ctx, err := ConfigureFromFile("crypto11.config.json")
 	require.NoError(t, err)
 
 	defer func() {

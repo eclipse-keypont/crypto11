@@ -41,7 +41,7 @@ const rsaSize = 2048
 
 func TestNativeRSA(t *testing.T) {
 
-	ctx, err := ConfigureFromFile("config")
+	ctx, err := ConfigureFromFile("crypto11.config.json")
 	require.NoError(t, err)
 
 	defer func() {
@@ -59,7 +59,7 @@ func TestNativeRSA(t *testing.T) {
 }
 
 func TestHardRSA(t *testing.T) {
-	ctx, err := ConfigureFromFile("config")
+	ctx, err := ConfigureFromFile("crypto11.config.json")
 	require.NoError(t, err)
 	defer func() {
 		require.NoError(t, ctx.Close())
@@ -245,7 +245,7 @@ func testRsaEncryptionOAEP(t *testing.T, key crypto.Decrypter, hashFunction cryp
 }
 
 func TestRsaRequiredArgs(t *testing.T) {
-	ctx, err := ConfigureFromFile("config")
+	ctx, err := ConfigureFromFile("crypto11.config.json")
 	require.NoError(t, err)
 
 	defer func() {

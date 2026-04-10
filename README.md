@@ -208,7 +208,7 @@ To set up a slot:
 
 The configuration looks like this:
 
-    $ cat config
+    $ cat crypto11.config.json
     {
       "Path" : "/usr/lib/softhsm/libsofthsm2.so",
       "TokenLabel": "test",
@@ -226,7 +226,7 @@ In all cases, it's worth enabling nShield PKCS#11 log output:
 
 To protect keys with a 1/N operator cardset:
 
-    $ cat config
+    $ cat crypto11.config.json
     {
       "Path" : "/opt/nfast/toolkits/pkcs11/libcknfast.so",
       "TokenLabel": "rjk",
@@ -236,7 +236,7 @@ To protect keys with a 1/N operator cardset:
 You can also identify the token by serial number, which in this case
 means the first 16 hex digits of the operator cardset's token hash:
 
-    $ cat config
+    $ cat crypto11.config.json
     {
       "Path" : "/opt/nfast/toolkits/pkcs11/libcknfast.so",
       "TokenSerial": "1d42780caa22efd5",
@@ -247,7 +247,7 @@ A card from the cardset must be in the slot when you run `go test`.
 
 To protect keys with the module only, use the 'accelerator' token:
 
-    $ cat config
+    $ cat crypto11.config.json
     {
       "Path" : "/opt/nfast/toolkits/pkcs11/libcknfast.so",
       "TokenLabel": "accelerator",

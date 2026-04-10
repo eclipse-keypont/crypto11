@@ -43,7 +43,7 @@ func mlkemSharedSecretTemplate() AttributeSet {
 }
 
 func TestMLKEM(t *testing.T) {
-	ctx, err := ConfigureFromFile("config")
+	ctx, err := ConfigureFromFile("crypto11.config.json")
 	require.NoError(t, err)
 	defer func() { _ = ctx.Close() }()
 

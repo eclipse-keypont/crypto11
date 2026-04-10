@@ -32,7 +32,7 @@ import (
 )
 
 func TestErrorAfterClosed(t *testing.T) {
-	ctx, err := ConfigureFromFile("config")
+	ctx, err := ConfigureFromFile("crypto11.config.json")
 	require.NoError(t, err)
 
 	err = ctx.Close()

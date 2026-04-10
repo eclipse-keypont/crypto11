@@ -37,8 +37,8 @@ import (
 // Behaviour:
 //
 //   - SOFTHSM3_MODULE set — creates a temp token via the PKCS#11 API, writes a
-//     "config" file, runs all tests, then cleans up.  No external tools required.
-//   - SOFTHSM3_MODULE not set — falls back to the pre-existing "config" file
+//     "crypto11.config.json" file, runs all tests, then cleans up.  No external tools required.
+//   - SOFTHSM3_MODULE not set — falls back to the pre-existing "crypto11.config.json" file
 //     (the manual setup described in README.md).
 //
 // SoftHSMv3 (https://github.com/pqctoday/softhsmv3) is required for ML-KEM
@@ -59,13 +59,13 @@ func TestMain(m *testing.M) {
 		teardown()
 		os.Exit(code)
 	}
-	// No module supplied — rely on a pre-existing "config" file.
+	// No module supplied — rely on a pre-existing "crypto11.config.json" file.
 	os.Exit(m.Run())
 }
 
 // initSoftHSM3Token creates ephemeral SoftHSM tokens, initialises them
 // entirely through the PKCS#11 API (C_InitToken / C_InitPIN), writes the
-// "config" JSON file that ConfigureFromFile expects, and returns a teardown
+// "crypto11.config.json" JSON file that ConfigureFromFile expects, and returns a teardown
 // function that removes both the config and the temp token directory.
 //
 // Three tokens are created:
@@ -173,11 +173,11 @@ func initSoftHSM3Token(modulePath string) func() {
 
 	// Back up any pre-existing config so we can restore it on teardown.
 	var previousConfig []byte
-	if data, err := os.ReadFile("config"); err == nil {
+	if data, err := os.ReadFile("crypto11.config.json"); err == nil {
 		previousConfig = data
 	}
 
-	if err := os.WriteFile("config", cfgBytes, 0600); err != nil {
+	if err := os.WriteFile("crypto11.config.json", cfgBytes, 0600); err != nil {
 		panic("write config: " + err.Error())
 	}
 	fmt.Printf("=== SoftHSMv3: tokens %q, %q, %q initialised on %s\n",
@@ -185,9 +185,9 @@ func initSoftHSM3Token(modulePath string) func() {
 
 	return func() {
 		if len(previousConfig) > 0 {
-			_ = os.WriteFile("config", previousConfig, 0600)
+			_ = os.WriteFile("crypto11.config.json", previousConfig, 0600)
 		} else {
-			os.Remove("config")
+			os.Remove("crypto11.config.json")
 		}
 		os.RemoveAll(dir)
 	}

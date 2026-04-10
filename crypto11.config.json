@@ -1,0 +1,17 @@
+{
+  "Path": "/path/to/softhsmv3/build/src/lib/libsofthsmv3.so",
+  "TokenSerial": "",
+  "TokenLabel": "crypto11-test",
+  "SlotNumber": null,
+  "Pin": "1234",
+  "MaxSessions": 0,
+  "UserType": 0,
+  "PoolWaitTimeout": 0,
+  "LoginNotSupported": false,
+  "UseGCMIVFromHSM": false,
+  "GCMIVLength": 0,
+  "GCMIVFromHSMControl": {
+    "SupplyIvForHSMGCMEncrypt": false,
+    "SupplyIvForHSMGCMDecrypt": false
+  }
+}
