@@ -6,26 +6,50 @@ Crypto11
 
 This is an implementation of the standard Golang crypto interfaces that
 uses [PKCS#11](http://docs.oasis-open.org/pkcs11/pkcs11-base/v2.40/errata01/os/pkcs11-base-v2.40-errata01-os-complete.html)
-as a backend. The supported features are:
+as a backend.
 
-* Generation and retrieval of RSA, DSA and ECDSA keys.
-* Importing and retrieval of x509 certificates
-* PKCS#1 v1.5 signing.
-* PKCS#1 PSS signing.
-* PKCS#1 v1.5 decryption
-* PKCS#1 OAEP decryption
-* ECDSA signing.
-* DSA signing.
-* Random number generation.
-* AES and DES3 encryption and decryption.
-* HMAC support.
+## Supported algorithms
+
+### Asymmetric keys
+
+| Algorithm | Key generation | Signing | Decryption | Notes |
+|-----------|:-:|:-:|:-:|-------|
+| RSA | ✓ | PKCS#1 v1.5, PSS | PKCS#1 v1.5, OAEP | Via `crypto.Signer` / `crypto.Decrypter` |
+| ECDSA | ✓ | ✓ | — | Via `crypto.Signer` |
+| DSA | ✓ | ✓ | — | Via `crypto.Signer` |
+
+To verify signatures or encrypt messages, retrieve the public key and do it in software.
+
+### Post-quantum keys (PKCS#11 v3.2)
+
+| Algorithm | Key generation | Encapsulation | Decapsulation | Notes |
+|-----------|:-:|:-:|:-:|-------|
+| ML-KEM 512 | ✓ | ✓ | ✓ | FIPS 203 / PKCS#11 v3.2 (`CKM_ML_KEM`) |
+| ML-KEM 768 | ✓ | ✓ | ✓ | FIPS 203 / PKCS#11 v3.2 (`CKM_ML_KEM`) |
+| ML-KEM 1024 | ✓ | ✓ | ✓ | FIPS 203 / PKCS#11 v3.2 (`CKM_ML_KEM`) |
+
+ML-KEM uses the `MLKEMEncapsulator` / `MLKEMDecapsulator` interfaces (not `crypto.Signer`).
+Requires a PKCS#11 v3.2-capable token such as [SoftHSMv3](https://github.com/pqctoday/softhsmv3).
+
+### Symmetric keys
+
+| Algorithm | Key sizes | Modes | Notes |
+|-----------|-----------|-------|-------|
+| AES | 128, 192, 256 bit | CBC, GCM | `cipher.Block`, `cipher.BlockMode`, `BlockModeCloser`, AEAD |
+| DES3 | 192 bit | CBC | Token support varies |
+
+### Other
+
+| Feature | Notes |
+|---------|-------|
+| X.509 certificates | Import and retrieval |
+| HMAC | Token support varies (not available on SoftHSM) |
+| Random number generation | Via `io.Reader` |
 
 Signing is done through the
 [crypto.Signer](https://golang.org/pkg/crypto/#Signer) interface and
 decryption through
 [crypto.Decrypter](https://golang.org/pkg/crypto/#Decrypter).
-
-To verify signatures or encrypt messages, retrieve the public key and do it in software.
 
 See [the documentation](https://godoc.org/github.com/ThalesIgnite/crypto11) for details of various limitations,
 especially regarding symmetric crypto.
@@ -136,8 +160,34 @@ noticed when testing with the v2.0.4 PKCS#11 library:
   HSM error 8c: HSM Error: Already maximum number of sessions are issued
   ```
 
+Testing with SoftHSMv3 (recommended)
+-------------------------------------
+
+[SoftHSMv3](https://github.com/pqctoday/softhsmv3) supports PKCS#11 v3.2 and is required for
+ML-KEM and other post-quantum tests. Token provisioning is fully automated:
+
+```sh
+SOFTHSM3_MODULE=/path/to/libsofthsmv3.so go test ./...
+```
+
+Override the user PIN (default `1234`):
+
+```sh
+SOFTHSM3_MODULE=/path/to/libsofthsmv3.so SOFTHSM3_PIN=mypin go test ./...
+```
+
+`TestMain` in `setup_test.go` creates three ephemeral tokens (`crypto11-test`, `token1`, `token2`)
+via the PKCS#11 API, writes a temporary `config` file, runs all tests, then cleans up. No
+external tools or manual token setup are required.
+
+DSA, DES3, PSS, and HMAC are not supported by SoftHSMv3 and those tests are automatically skipped.
+
 Testing with SoftHSM2
 ---------------------
+
+[SoftHSMv2](https://github.com/softhsm/SoftHSMv2) covers all classical algorithms but does **not**
+support ML-KEM or other PKCS#11 v3.2 mechanisms (those tests will be skipped automatically via
+`skipIfMechUnsupported`).
 
 To set up a slot:
 
@@ -165,7 +215,7 @@ The configuration looks like this:
       "Pin" : "password"
     }
 
-(At time of writing) OAEP is only partial and HMAC is unsupported, so expect test skips.
+OAEP is only partial and HMAC is unsupported on SoftHSMv2, so expect test skips.
 
 Testing with nCipher nShield
 ----------------------------
