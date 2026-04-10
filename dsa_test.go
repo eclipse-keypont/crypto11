@@ -32,6 +32,7 @@ import (
 	"math/big"
 	"testing"
 
+	"github.com/miekg/pkcs11"
 	"github.com/stretchr/testify/require"
 )
 
@@ -110,6 +111,8 @@ func TestHardDSA(t *testing.T) {
 		err = ctx.Close()
 		require.NoError(t, err)
 	}()
+
+	skipIfMechUnsupported(t, ctx, pkcs11.CKM_DSA_KEY_PAIR_GEN)
 
 	for pSize, params := range dsaSizes {
 
