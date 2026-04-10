@@ -30,6 +30,7 @@ import (
 
 func TestBlockMode(t *testing.T) {
 	ctx, err := ConfigureFromFile("config")
+	require.NoError(t, err)
 	defer func() {
 		require.NoError(t, ctx.Close())
 	}()
