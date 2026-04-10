@@ -63,16 +63,22 @@ func TestMain(m *testing.M) {
 	os.Exit(m.Run())
 }
 
-// initSoftHSM3Token creates an ephemeral SoftHSM token, initialises it
+// initSoftHSM3Token creates ephemeral SoftHSM tokens, initialises them
 // entirely through the PKCS#11 API (C_InitToken / C_InitPIN), writes the
 // "config" JSON file that ConfigureFromFile expects, and returns a teardown
 // function that removes both the config and the temp token directory.
+//
+// Three tokens are created:
+//   - "crypto11-test" — main token used by most tests (written to config)
+//   - "token1" / "token2" — secondary tokens used by TestInvalidPinDoesntDestroyLibrary
 //
 // The function uses the same softhsm2.conf INI format accepted by both
 // SoftHSMv2 and SoftHSMv3 (env var SOFTHSM2_CONF).
 func initSoftHSM3Token(modulePath string) func() {
 	const soPin = "0000"
-	const tokenLabel = "crypto11-test"
+	const mainLabel = "crypto11-test"
+	const token1Label = "token1"
+	const token2Label = "token2"
 
 	userPin := os.Getenv("SOFTHSM3_PIN")
 	if userPin == "" {
@@ -101,43 +107,63 @@ func initSoftHSM3Token(modulePath string) func() {
 	}
 	os.Setenv("SOFTHSM2_CONF", confPath)
 
-	// ── Initialise the token via PKCS#11 ─────────────────────────────────────
-	// Step 1 — load module and find an uninitialised slot.
+	// ── Initialise all tokens via PKCS#11 ────────────────────────────────────
+	// After each C_InitToken call SoftHSM makes a new uninitialized slot
+	// available, so we can call GetSlotList(false) again to obtain it.
 	p11 := pkcs11.New(modulePath)
 	if p11 == nil {
 		panic("pkcs11.New failed for " + modulePath)
 	}
 	p11Must(p11.Initialize(), "C_Initialize")
 
-	slots, err := p11.GetSlotList(false) // tokenPresent=false → uninitialized slots
-	p11Must(err, "C_GetSlotList(false)")
-	if len(slots) == 0 {
-		panic("C_GetSlotList(false): no slots available")
+	// GetSlotList(false) = ALL slots; GetSlotList(true) = only initialized ones.
+	// Uninitialized slots are the set difference. We must recompute each iteration
+	// because InitToken changes the slot list.
+	for _, label := range []string{mainLabel, token1Label, token2Label} {
+		allSlots, err := p11.GetSlotList(false)
+		p11Must(err, "C_GetSlotList(false) before "+label)
+		initSlots, err := p11.GetSlotList(true)
+		p11Must(err, "C_GetSlotList(true) before "+label)
+
+		initSet := make(map[uint]bool, len(initSlots))
+		for _, s := range initSlots {
+			initSet[s] = true
+		}
+
+		var uninitSlot uint
+		uninitFound := false
+		for _, s := range allSlots {
+			if !initSet[s] {
+				uninitSlot = s
+				uninitFound = true
+				break
+			}
+		}
+		if !uninitFound {
+			panic("no uninitialized slot available for " + label)
+		}
+		p11Must(p11.InitToken(uninitSlot, soPin, label), "C_InitToken("+label+")")
 	}
 
-	// Step 2 — initialise the token; the slot ID changes after this call.
-	p11Must(p11.InitToken(slots[0], soPin, tokenLabel), "C_InitToken")
-
-	slots, err = p11.GetSlotList(true) // tokenPresent=true → find the new slot
+	// Set the user PIN on every initialized token.
+	initSlots, err := p11.GetSlotList(true)
 	p11Must(err, "C_GetSlotList(true)")
-	if len(slots) == 0 {
-		panic("C_GetSlotList(true): no initialised slot found after C_InitToken")
+	for _, slot := range initSlots {
+		sh, err := p11.OpenSession(slot, pkcs11.CKF_SERIAL_SESSION|pkcs11.CKF_RW_SESSION)
+		p11Must(err, "C_OpenSession")
+		p11Must(p11.Login(sh, pkcs11.CKU_SO, soPin), "C_Login(SO)")
+		p11Must(p11.InitPIN(sh, userPin), "C_InitPIN")
+		p11.Logout(sh)
+		p11.CloseSession(sh)
 	}
 
-	// Step 3 — open an SO session and set the user PIN.
-	sh, err := p11.OpenSession(slots[0], pkcs11.CKF_SERIAL_SESSION|pkcs11.CKF_RW_SESSION)
-	p11Must(err, "C_OpenSession")
-	p11Must(p11.Login(sh, pkcs11.CKU_SO, soPin), "C_Login(SO)")
-	p11Must(p11.InitPIN(sh, userPin), "C_InitPIN")
-	p11.Logout(sh)
-	p11.CloseSession(sh)
 	p11.Finalize()
 	p11.Destroy()
 
-	// ── Write the crypto11 config file ───────────────────────────────────────
+	// ── Write the crypto11 config file (pointing to the main token) ──────────
 	cfg := Config{
 		Path:       modulePath,
-		TokenLabel: tokenLabel,
+		TokenLabel: mainLabel,
 		Pin:        userPin,
 	}
 	cfgBytes, err := json.MarshalIndent(cfg, "", "  ")
@@ -154,7 +180,8 @@ func initSoftHSM3Token(modulePath string) func() {
 	if err := os.WriteFile("config", cfgBytes, 0600); err != nil {
 		panic("write config: " + err.Error())
 	}
-	fmt.Printf("=== SoftHSMv3: token %q initialised on %s\n", tokenLabel, modulePath)
+	fmt.Printf("=== SoftHSMv3: tokens %q, %q, %q initialised on %s\n",
+		mainLabel, token1Label, token2Label, modulePath)
 
 	return func() {
 		if len(previousConfig) > 0 {
