@@ -32,7 +32,7 @@ import (
 )
 
 func TestHardSymmetric(t *testing.T) {
-	ctx, err := ConfigureFromFile("config")
+	ctx, err := ConfigureFromFile("crypto11.config.json")
 	require.NoError(t, err)
 
 	defer func() {
@@ -192,7 +192,7 @@ func testAEADMode(t *testing.T, aead cipher.AEAD, ptlen int, adlen int) {
 }
 
 func BenchmarkCBC(b *testing.B) {
-	ctx, err := ConfigureFromFile("config")
+	ctx, err := ConfigureFromFile("crypto11.config.json")
 	require.NoError(b, err)
 
 	defer func() {
@@ -241,7 +241,7 @@ func BenchmarkCBC(b *testing.B) {
 }
 
 func TestSymmetricRequiredArgs(t *testing.T) {
-	ctx, err := ConfigureFromFile("config")
+	ctx, err := ConfigureFromFile("crypto11.config.json")
 	require.NoError(t, err)
 
 	defer func() {

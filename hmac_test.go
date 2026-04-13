@@ -29,7 +29,7 @@ import (
 )
 
 func TestHmac(t *testing.T) {
-	ctx, err := ConfigureFromFile("config")
+	ctx, err := ConfigureFromFile("crypto11.config.json")
 	require.NoError(t, err)
 
 	defer func() {

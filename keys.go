@@ -1,4 +1,4 @@
-// Copyright 2024 Thales Group
+// Copyright 2026 Thales Group
 //
 // Permission is hereby granted, free of charge, to any person obtaining
 // a copy of this software and associated documentation files (the
@@ -710,6 +710,8 @@ func (c *Context) GetAttributes(key interface{}, attributes []AttributeType) (a 
 		handle = k.handle
 	case *pkcs11PrivateKeyECDSA:
 		handle = k.handle
+	case *pkcs11MLKEMKeyPair:
+		handle = k.handle
 	case *SecretKey:
 		handle = k.handle
 	default:
@@ -752,6 +754,8 @@ func (c *Context) GetPubAttributes(key interface{}, attributes []AttributeType) 
 	case *pkcs11PrivateKeyRSA:
 		handle = k.pubKeyHandle
 	case *pkcs11PrivateKeyECDSA:
+		handle = k.pubKeyHandle
+	case *pkcs11MLKEMKeyPair:
 		handle = k.pubKeyHandle
 	default:
 		return nil, errors.Errorf("not an asymmetric PKCS#11 key")

@@ -41,7 +41,7 @@ const rsaSize = 2048
 
 func TestNativeRSA(t *testing.T) {
 
-	ctx, err := ConfigureFromFile("config")
+	ctx, err := ConfigureFromFile("crypto11.config.json")
 	require.NoError(t, err)
 
 	defer func() {
@@ -59,7 +59,7 @@ func TestNativeRSA(t *testing.T) {
 }
 
 func TestHardRSA(t *testing.T) {
-	ctx, err := ConfigureFromFile("config")
+	ctx, err := ConfigureFromFile("crypto11.config.json")
 	require.NoError(t, err)
 	defer func() {
 		require.NoError(t, ctx.Close())
@@ -134,7 +134,7 @@ func testRsaSigningPKCS1v15(t *testing.T, key crypto.Signer, hashFunction crypto
 	sig, err := key.Sign(rand.Reader, plaintextHash, hashFunction)
 	require.NoError(t, err)
 
-	rsaPubkey := key.Public().(crypto.PublicKey).(*rsa.PublicKey)
+	rsaPubkey := key.Public().(*rsa.PublicKey)
 	err = rsa.VerifyPKCS1v15(rsaPubkey, hashFunction, plaintextHash, sig)
 	require.NoError(t, err)
 }
@@ -158,7 +158,7 @@ func testRsaSigningPSS(t *testing.T, key crypto.Signer, hashFunction crypto.Hash
 	sig, err := key.Sign(rand.Reader, plaintextHash, pssOptions)
 	require.NoError(t, err)
 
-	rsaPubkey := key.Public().(crypto.PublicKey).(*rsa.PublicKey)
+	rsaPubkey := key.Public().(*rsa.PublicKey)
 
 	err = rsa.VerifyPSS(rsaPubkey, hashFunction, plaintextHash, sig, pssOptions)
 	require.NoError(t, err)
@@ -188,7 +188,7 @@ func testRsaEncryptionPKCS1v15(t *testing.T, key crypto.Decrypter) {
 	var ciphertext, decrypted []byte
 
 	plaintext := []byte("encrypt me with old and busted crypto")
-	rsaPubkey := key.Public().(crypto.PublicKey).(*rsa.PublicKey)
+	rsaPubkey := key.Public().(*rsa.PublicKey)
 	if ciphertext, err = rsa.EncryptPKCS1v15(rand.Reader, rsaPubkey, plaintext); err != nil {
 		t.Errorf("PKCS#1v1.5 Encrypt: %v", err)
 		return
@@ -229,7 +229,7 @@ func testRsaEncryptionOAEP(t *testing.T, key crypto.Decrypter, hashFunction cryp
 
 	plaintext := []byte("encrypt me with new hotness")
 	h := hashFunction.New()
-	rsaPubkey := key.Public().(crypto.PublicKey).(*rsa.PublicKey)
+	rsaPubkey := key.Public().(*rsa.PublicKey)
 
 	ciphertext, err := rsa.EncryptOAEP(h, rand.Reader, rsaPubkey, plaintext, label)
 	require.NoError(t, err)
@@ -245,7 +245,7 @@ func testRsaEncryptionOAEP(t *testing.T, key crypto.Decrypter, hashFunction cryp
 }
 
 func TestRsaRequiredArgs(t *testing.T) {
-	ctx, err := ConfigureFromFile("config")
+	ctx, err := ConfigureFromFile("crypto11.config.json")
 	require.NoError(t, err)
 
 	defer func() {

@@ -32,6 +32,7 @@ import (
 	"math/big"
 	"testing"
 
+	"github.com/miekg/pkcs11"
 	"github.com/stretchr/testify/require"
 )
 
@@ -103,13 +104,15 @@ func TestNativeDSA(t *testing.T) {
 func TestHardDSA(t *testing.T) {
 	skipTest(t, skipTestDSA)
 
-	ctx, err := ConfigureFromFile("config")
+	ctx, err := ConfigureFromFile("crypto11.config.json")
 	require.NoError(t, err)
 
 	defer func() {
 		err = ctx.Close()
 		require.NoError(t, err)
 	}()
+
+	skipIfMechUnsupported(t, ctx, pkcs11.CKM_DSA_KEY_PAIR_GEN)
 
 	for pSize, params := range dsaSizes {
 
@@ -177,14 +180,14 @@ func testDsaSigningWithHash(t *testing.T, key crypto.Signer, hashFunction crypto
 	err = sig.unmarshalDER(sigDER)
 	require.NoError(t, err)
 
-	dsaPubkey := key.Public().(crypto.PublicKey).(*dsa.PublicKey)
+	dsaPubkey := key.Public().(*dsa.PublicKey)
 	if !dsa.Verify(dsaPubkey, plaintextHash, sig.R, sig.S) {
 		t.Errorf("DSA %s Verify failed (psize %d hash %v)", what, psize, hashFunction)
 	}
 }
 
 func TestDsaRequiredArgs(t *testing.T) {
-	ctx, err := ConfigureFromFile("config")
+	ctx, err := ConfigureFromFile("crypto11.config.json")
 	require.NoError(t, err)
 
 	defer func() {

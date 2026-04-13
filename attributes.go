@@ -1,4 +1,4 @@
-// Copyright 2024 Thales Group
+// Copyright 2026 Thales Group
 //
 // Permission is hereby granted, free of charge, to any person obtaining
 // a copy of this software and associated documentation files (the
@@ -22,7 +22,6 @@
 package crypto11
 
 import (
-	"errors"
 	"fmt"
 	"strings"
 
@@ -35,7 +34,7 @@ type AttributeType = uint
 // Attribute represents a PKCS#11 CK_ATTRIBUTE type.
 type Attribute = pkcs11.Attribute
 
-//noinspection GoUnusedConst,GoDeprecation
+// noinspection GoUnusedConst,GoDeprecation
 const (
 	CkaClass                  = AttributeType(0x00000000)
 	CkaToken                  = AttributeType(0x00000001)
@@ -166,6 +165,13 @@ const (
 	CkaDefaultCmsAttributes   = AttributeType(0x00000502)
 	CkaSupportedCmsAttributes = AttributeType(0x00000503)
 	CkaAllowedMechanisms      = ckfArrayAttribute | AttributeType(0x00000600)
+
+	/* new for v3.2 (PKCS#11 v3.2, KEM / post-quantum) */
+	CkaParameterSet        = AttributeType(0x0000061d)
+	CkaEncapsulateTemplate = AttributeType(0x0000062a)
+	CkaDecapsulateTemplate = AttributeType(0x0000062b)
+	CkaEncapsulate         = AttributeType(0x00000633)
+	CkaDecapsulate         = AttributeType(0x00000634)
 )
 
 // NewAttribute is a helper function that populates a new Attribute for common data types. This function will
@@ -174,7 +180,7 @@ func NewAttribute(attributeType AttributeType, value interface{}) (a *Attribute,
 	// catch any panics from the pkcs11.NewAttribute() call to keyHandle the error cleanly
 	defer func() {
 		if r := recover(); r != nil {
-			err = errors.New(fmt.Sprintf("failed creating Attribute: %v", r))
+			err = fmt.Errorf("failed creating Attribute: %v", r)
 		}
 	}()
 
@@ -185,7 +191,7 @@ func NewAttribute(attributeType AttributeType, value interface{}) (a *Attribute,
 // CopyAttribute returns a deep copy of the given Attribute.
 func CopyAttribute(a *Attribute) *Attribute {
 	var value []byte
-	if a.Value != nil && len(a.Value) > 0 {
+	if len(a.Value) > 0 {
 		value = append([]byte(nil), a.Value...)
 	}
 	return &pkcs11.Attribute{
@@ -525,6 +531,18 @@ func attributeTypeString(a AttributeType) string {
 		return "CkaSupportedCmsAttributes"
 	case CkaAllowedMechanisms:
 		return "CkaAllowedMechanisms"
+
+	case CkaParameterSet:
+		return "CkaParameterSet"
+	case CkaEncapsulateTemplate:
+		return "CkaEncapsulateTemplate"
+	case CkaDecapsulateTemplate:
+		return "CkaDecapsulateTemplate"
+	case CkaEncapsulate:
+		return "CkaEncapsulate"
+	case CkaDecapsulate:
+		return "CkaDecapsulate"
+
 	default:
 		return "Unknown"
 	}

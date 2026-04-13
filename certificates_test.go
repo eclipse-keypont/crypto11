@@ -38,7 +38,7 @@ import (
 func TestCertificate(t *testing.T) {
 	skipTest(t, skipTestCert)
 
-	ctx, err := ConfigureFromFile("config")
+	ctx, err := ConfigureFromFile("crypto11.config.json")
 	require.NoError(t, err)
 
 	defer func() {
@@ -74,7 +74,7 @@ func TestCertificate(t *testing.T) {
 func TestCertificateAttributes(t *testing.T) {
 	skipTest(t, skipTestCert)
 
-	ctx, err := ConfigureFromFile("config")
+	ctx, err := ConfigureFromFile("crypto11.config.json")
 	require.NoError(t, err)
 
 	defer func() {
@@ -109,7 +109,7 @@ func TestCertificateAttributes(t *testing.T) {
 func TestCertificateRequiredArgs(t *testing.T) {
 	skipTest(t, skipTestCert)
 
-	ctx, err := ConfigureFromFile("config")
+	ctx, err := ConfigureFromFile("crypto11.config.json")
 	require.NoError(t, err)
 
 	defer func() {
@@ -133,7 +133,7 @@ func TestCertificateRequiredArgs(t *testing.T) {
 func TestDeleteCertificate(t *testing.T) {
 	skipTest(t, skipTestCert)
 
-	ctx, err := ConfigureFromFile("config")
+	ctx, err := ConfigureFromFile("crypto11.config.json")
 	require.NoError(t, err)
 
 	defer func() {
