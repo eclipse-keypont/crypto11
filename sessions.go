@@ -25,7 +25,7 @@ import (
 	"context"
 	"errors"
 
-	"github.com/miekg/pkcs11"
+	pkcs11 "github.com/eclipse-keypont/pkcs11-go/cryptoki"
 	"github.com/thales-e-security/pool"
 )
 

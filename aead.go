@@ -26,7 +26,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/miekg/pkcs11"
+	pkcs11 "github.com/eclipse-keypont/pkcs11-go/cryptoki"
 )
 
 // cipher.AEAD ----------------------------------------------------------
@@ -53,7 +53,7 @@ type genericAead struct {
 
 	// Note - if the GCMParams result is non-nil, the caller must call Free() on the params when
 	// finished.
-	makeMech func(nonce []byte, additionalData []byte, encrypt bool) ([]*pkcs11.Mechanism, *pkcs11.GCMParams, error)
+	makeMech func(nonce []byte, additionalData []byte, encrypt bool) (*pkcs11.Mechanism, *pkcs11.GCMParams, error)
 }
 
 // NewGCM returns a given cipher wrapped in Galois Counter Mode, with the standard
@@ -70,7 +70,7 @@ func (key *SecretKey) NewGCM() (cipher.AEAD, error) {
 		key:       key,
 		overhead:  16,
 		nonceSize: key.context.cfg.GCMIVLength,
-		makeMech: func(nonce []byte, additionalData []byte, encrypt bool) ([]*pkcs11.Mechanism, *pkcs11.GCMParams, error) {
+		makeMech: func(nonce []byte, additionalData []byte, encrypt bool) (*pkcs11.Mechanism, *pkcs11.GCMParams, error) {
 			var params *pkcs11.GCMParams
 
 			if (encrypt && key.context.cfg.UseGCMIVFromHSM &&
@@ -80,7 +80,7 @@ func (key *SecretKey) NewGCM() (cipher.AEAD, error) {
 			} else {
 				params = pkcs11.NewGCMParams(nonce, additionalData, 16*8 /*bits*/)
 			}
-			return []*pkcs11.Mechanism{pkcs11.NewMechanism(key.Cipher.GCMMech, params)}, params, nil
+			return pkcs11.NewMechanismWithParams(key.Cipher.GCMMech, params), params, nil
 		},
 	}
 	return g, nil

@@ -30,7 +30,7 @@ import (
 	"io"
 	"math/big"
 
-	"github.com/miekg/pkcs11"
+	pkcs11 "github.com/eclipse-keypont/pkcs11-go/cryptoki"
 )
 
 // errMalformedRSAPublicKey is returned when an RSA public key is not in a suitable form.
@@ -151,7 +151,7 @@ func (c *Context) GenerateRSAKeyPairWithAttributes(public, private AttributeSet,
 			pkcs11.NewAttribute(pkcs11.CKA_EXTRACTABLE, false),
 		})
 
-		mech := []*pkcs11.Mechanism{pkcs11.NewMechanism(pkcs11.CKM_RSA_PKCS_KEY_PAIR_GEN, nil)}
+		mech := pkcs11.NewMechanism(pkcs11.CKM_RSA_PKCS_KEY_PAIR_GEN, nil)
 		pubHandle, privHandle, err := session.ctx.GenerateKeyPair(session.handle,
 			mech,
 			public.ToSlice(),
@@ -477,7 +477,7 @@ func decryptPKCS1v15(session *pkcs11Session, key *pkcs11PrivateKeyRSA, ciphertex
 	if sessionKeyLen != 0 {
 		return nil, errUnsupportedRSAOptions
 	}
-	mech := []*pkcs11.Mechanism{pkcs11.NewMechanism(pkcs11.CKM_RSA_PKCS, nil)}
+	mech := pkcs11.NewMechanism(pkcs11.CKM_RSA_PKCS, nil)
 	if err := session.ctx.DecryptInit(session.handle, mech, key.handle); err != nil {
 		return nil, err
 	}
@@ -492,10 +492,10 @@ func decryptOAEP(session *pkcs11Session, key *pkcs11PrivateKeyRSA, ciphertext []
 		return nil, err
 	}
 
-	mech := pkcs11.NewMechanism(pkcs11.CKM_RSA_PKCS_OAEP,
+	mech := pkcs11.NewMechanismWithParams(pkcs11.CKM_RSA_PKCS_OAEP,
 		pkcs11.NewOAEPParams(hashAlg, mgfAlg, pkcs11.CKZ_DATA_SPECIFIED, label))
 
-	err = session.ctx.DecryptInit(session.handle, []*pkcs11.Mechanism{mech}, key.handle)
+	err = session.ctx.DecryptInit(session.handle, mech, key.handle)
 	if err != nil {
 		return nil, err
 	}
@@ -541,7 +541,7 @@ func signPSS(session *pkcs11Session, key *pkcs11PrivateKeyRSA, digest []byte, op
 	parameters := concat(ulongToBytes(hMech),
 		ulongToBytes(mgf),
 		ulongToBytes(sLen))
-	mech := []*pkcs11.Mechanism{pkcs11.NewMechanism(pkcs11.CKM_RSA_PKCS_PSS, parameters)}
+	mech := pkcs11.NewMechanism(pkcs11.CKM_RSA_PKCS_PSS, parameters)
 	if err = session.ctx.SignInit(session.handle, mech, key.handle); err != nil {
 		return nil, err
 	}
@@ -562,7 +562,7 @@ func signPKCS1v15(session *pkcs11Session, key *pkcs11PrivateKeyRSA, digest []byt
 	T := make([]byte, len(oid)+len(digest))
 	copy(T[0:len(oid)], oid)
 	copy(T[len(oid):], digest)
-	mech := []*pkcs11.Mechanism{pkcs11.NewMechanism(pkcs11.CKM_RSA_PKCS, nil)}
+	mech := pkcs11.NewMechanism(pkcs11.CKM_RSA_PKCS, nil)
 	err = session.ctx.SignInit(session.handle, mech, key.handle)
 	if err == nil {
 		signature, err = session.ctx.Sign(session.handle, T)

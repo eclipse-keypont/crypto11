@@ -28,7 +28,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/miekg/pkcs11"
+	pkcs11 "github.com/eclipse-keypont/pkcs11-go/cryptoki"
 )
 
 // TestMain optionally bootstraps an ephemeral SoftHSMv3 token before running
@@ -108,32 +108,28 @@ func initSoftHSM3Token(modulePath string) func() {
 	os.Setenv("SOFTHSM2_CONF", confPath)
 
 	// ── Initialise all tokens via PKCS#11 ────────────────────────────────────
-	// After each C_InitToken call SoftHSM makes a new uninitialized slot
-	// available, so we can call GetSlotList(false) again to obtain it.
-	p11 := pkcs11.New(modulePath)
-	if p11 == nil {
-		panic("pkcs11.New failed for " + modulePath)
+	p11, err := pkcs11.New(modulePath)
+	if err != nil {
+		panic("pkcs11.New failed for " + modulePath + ": " + err.Error())
 	}
 	p11Must(p11.Initialize(), "C_Initialize")
 
-	// GetSlotList(false) = ALL slots; GetSlotList(true) = only initialized ones.
-	// Uninitialized slots are the set difference. We must recompute each iteration
-	// because InitToken changes the slot list.
+	// SoftHSMv3's isTokenPresent() always returns true, so GetSlotList(false)
+	// and GetSlotList(true) return identical sets. We detect the uninitialized
+	// slot by inspecting CKF_TOKEN_INITIALIZED in each slot's TokenInfo instead.
+	// We recompute the slot list each iteration because InitToken adds a new slot.
 	for _, label := range []string{mainLabel, token1Label, token2Label} {
 		allSlots, err := p11.GetSlotList(false)
 		p11Must(err, "C_GetSlotList(false) before "+label)
-		initSlots, err := p11.GetSlotList(true)
-		p11Must(err, "C_GetSlotList(true) before "+label)
 
-		initSet := make(map[uint]bool, len(initSlots))
-		for _, s := range initSlots {
-			initSet[s] = true
-		}
-
-		var uninitSlot uint
+		var uninitSlot pkcs11.SlotID
 		uninitFound := false
 		for _, s := range allSlots {
-			if !initSet[s] {
+			info, err := p11.GetTokenInfo(s)
+			if err != nil {
+				continue
+			}
+			if info.Flags&pkcs11.CKF_TOKEN_INITIALIZED == 0 {
 				uninitSlot = s
 				uninitFound = true
 				break
@@ -142,17 +138,21 @@ func initSoftHSM3Token(modulePath string) func() {
 		if !uninitFound {
 			panic("no uninitialized slot available for " + label)
 		}
-		p11Must(p11.InitToken(uninitSlot, soPin, label), "C_InitToken("+label+")")
+		p11Must(p11.InitToken(uninitSlot, []byte(soPin), label), "C_InitToken("+label+")")
 	}
 
 	// Set the user PIN on every initialized token.
-	initSlots, err := p11.GetSlotList(true)
-	p11Must(err, "C_GetSlotList(true)")
-	for _, slot := range initSlots {
+	allSlots, err := p11.GetSlotList(false)
+	p11Must(err, "C_GetSlotList")
+	for _, slot := range allSlots {
+		info, err := p11.GetTokenInfo(slot)
+		if err != nil || info.Flags&pkcs11.CKF_TOKEN_INITIALIZED == 0 {
+			continue
+		}
 		sh, err := p11.OpenSession(slot, pkcs11.CKF_SERIAL_SESSION|pkcs11.CKF_RW_SESSION)
 		p11Must(err, "C_OpenSession")
-		p11Must(p11.Login(sh, pkcs11.CKU_SO, soPin), "C_Login(SO)")
-		p11Must(p11.InitPIN(sh, userPin), "C_InitPIN")
+		p11Must(p11.Login(sh, pkcs11.CKU_SO, []byte(soPin)), "C_Login(SO)")
+		p11Must(p11.InitPIN(sh, []byte(userPin)), "C_InitPIN")
 		p11.Logout(sh)
 		p11.CloseSession(sh)
 	}

@@ -27,7 +27,7 @@ import (
 	"encoding/asn1"
 	"math/big"
 
-	"github.com/miekg/pkcs11"
+	pkcs11 "github.com/eclipse-keypont/pkcs11-go/cryptoki"
 	"github.com/pkg/errors"
 )
 
@@ -84,7 +84,7 @@ func findRawCertificate(session *pkcs11Session, id []byte, label []byte, serial 
 		}
 	}()
 
-	handles, _, err := session.ctx.FindObjects(session.handle, 1)
+	handles, err := session.ctx.FindObjects(session.handle, 1)
 	if err != nil {
 		return nil, err
 	}
@@ -281,7 +281,7 @@ func (c *Context) DeleteCertificate(id []byte, label []byte, serial *big.Int) er
 		if err != nil {
 			return err
 		}
-		handles, _, err := session.ctx.FindObjects(session.handle, 1)
+		handles, err := session.ctx.FindObjects(session.handle, 1)
 		finalErr := session.ctx.FindObjectsFinal(session.handle)
 		if err != nil {
 			return err

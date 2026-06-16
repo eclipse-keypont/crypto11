@@ -24,7 +24,7 @@ package crypto11
 import (
 	"errors"
 
-	"github.com/miekg/pkcs11"
+	pkcs11 "github.com/eclipse-keypont/pkcs11-go/cryptoki"
 )
 
 // SymmetricGenParams holds a consistent (key type, mechanism) key generation pair.
@@ -313,7 +313,7 @@ func (c *Context) GenerateSecretKeyWithAttributes(template AttributeSet, bits in
 
 			_ = template.Set(CkaKeyType, genMech.KeyType)
 
-			mech := []*pkcs11.Mechanism{pkcs11.NewMechanism(genMech.GenMech, nil)}
+			mech := pkcs11.NewMechanism(genMech.GenMech, nil)
 
 			privHandle, err := session.ctx.GenerateKey(session.handle, mech, template.ToSlice())
 			if err == nil {

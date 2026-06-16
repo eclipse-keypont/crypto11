@@ -30,7 +30,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/miekg/pkcs11"
+	pkcs11 "github.com/eclipse-keypont/pkcs11-go/cryptoki"
 
 	"github.com/stretchr/testify/assert"
 
@@ -60,24 +60,6 @@ func TestKeysPersistAcrossContexts(t *testing.T) {
 	testRsaSigning(t, key2, false)
 	_ = key2.Delete()
 	require.NoError(t, ctx.Close())
-}
-
-func configureWithPin(t *testing.T) (*Context, error) {
-	cfg, err := getConfig("crypto11.config.json")
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if cfg.Pin == "" {
-		t.Fatal("invalid configuration. configuration must have PIN non empty.")
-	}
-
-	ctx, err := Configure(cfg)
-	if err != nil {
-		t.Fatal("failed to configure service:", err)
-	}
-
-	return ctx, nil
 }
 
 func getConfig(configLocation string) (ctx *Config, err error) {
@@ -313,7 +295,7 @@ func TestInvalidPinDoesntDestroyLibrary(t *testing.T) {
 
 	// Try to configure context with invalid pin in configuration.
 	_, err = Configure(cfgWrongPin)
-	require.EqualError(t, err, "failed to log into long term session: pkcs11: 0xA0: CKR_PIN_INCORRECT")
+	require.EqualError(t, err, "failed to log into long term session: pkcs11: CKR_PIN_INCORRECT")
 
 	// Existing context should continue to work.
 	_, err = ctx1.FindAllKeys()

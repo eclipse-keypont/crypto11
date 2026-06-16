@@ -5,7 +5,7 @@ import (
 	"crypto/rsa"
 	"testing"
 
-	"github.com/miekg/pkcs11"
+	pkcs11 "github.com/eclipse-keypont/pkcs11-go/cryptoki"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"

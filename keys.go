@@ -26,7 +26,7 @@ import (
 	"crypto/x509"
 	"fmt"
 
-	"github.com/miekg/pkcs11"
+	pkcs11 "github.com/eclipse-keypont/pkcs11-go/cryptoki"
 	"github.com/pkg/errors"
 )
 
@@ -49,7 +49,7 @@ func findKeysWithAttributes(session *pkcs11Session, template []*pkcs11.Attribute
 		}
 	}()
 
-	newhandles, _, err := session.ctx.FindObjects(session.handle, maxHandlePerFind)
+	newhandles, err := session.ctx.FindObjects(session.handle, maxHandlePerFind)
 	if err != nil {
 		return nil, err
 	}
@@ -57,7 +57,7 @@ func findKeysWithAttributes(session *pkcs11Session, template []*pkcs11.Attribute
 	for len(newhandles) > 0 {
 		handles = append(handles, newhandles...)
 
-		newhandles, _, err = session.ctx.FindObjects(session.handle, maxHandlePerFind)
+		newhandles, err = session.ctx.FindObjects(session.handle, maxHandlePerFind)
 		if err != nil {
 			return nil, err
 		}

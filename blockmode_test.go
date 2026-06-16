@@ -22,7 +22,7 @@
 package crypto11
 
 import (
-	"github.com/miekg/pkcs11"
+	pkcs11 "github.com/eclipse-keypont/pkcs11-go/cryptoki"
 	"testing"
 
 	"github.com/stretchr/testify/require"

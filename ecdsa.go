@@ -30,7 +30,7 @@ import (
 	"io"
 	"math/big"
 
-	"github.com/miekg/pkcs11"
+	pkcs11 "github.com/eclipse-keypont/pkcs11-go/cryptoki"
 	"github.com/pkg/errors"
 )
 
@@ -267,7 +267,7 @@ func (c *Context) GenerateECDSAKeyPairWithAttributes(public, private AttributeSe
 			pkcs11.NewAttribute(pkcs11.CKA_EXTRACTABLE, false),
 		})
 
-		mech := []*pkcs11.Mechanism{pkcs11.NewMechanism(pkcs11.CKM_ECDSA_KEY_PAIR_GEN, nil)}
+		mech := pkcs11.NewMechanism(pkcs11.CKM_ECDSA_KEY_PAIR_GEN, nil)
 		pubHandle, privHandle, err := session.ctx.GenerateKeyPair(session.handle,
 			mech,
 			public.ToSlice(),

@@ -25,7 +25,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/miekg/pkcs11"
+	pkcs11 "github.com/eclipse-keypont/pkcs11-go/cryptoki"
 )
 
 // AttributeType represents a PKCS#11 CK_ATTRIBUTE value.

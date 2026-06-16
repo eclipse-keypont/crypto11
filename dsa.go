@@ -29,7 +29,7 @@ import (
 
 	"github.com/pkg/errors"
 
-	pkcs11 "github.com/miekg/pkcs11"
+	pkcs11 "github.com/eclipse-keypont/pkcs11-go/cryptoki"
 )
 
 // pkcs11PrivateKeyDSA contains a reference to a loaded PKCS#11 DSA private key object.
@@ -140,7 +140,7 @@ func (c *Context) GenerateDSAKeyPairWithAttributes(public, private AttributeSet,
 			pkcs11.NewAttribute(pkcs11.CKA_EXTRACTABLE, false),
 		})
 
-		mech := []*pkcs11.Mechanism{pkcs11.NewMechanism(pkcs11.CKM_DSA_KEY_PAIR_GEN, nil)}
+		mech := pkcs11.NewMechanism(pkcs11.CKM_DSA_KEY_PAIR_GEN, nil)
 		pubHandle, privHandle, err := session.ctx.GenerateKeyPair(session.handle,
 			mech,
 			public.ToSlice(),

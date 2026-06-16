@@ -24,7 +24,7 @@ package crypto11
 import (
 	"fmt"
 
-	"github.com/miekg/pkcs11"
+	pkcs11 "github.com/eclipse-keypont/pkcs11-go/cryptoki"
 	"github.com/pkg/errors"
 )
 
@@ -123,7 +123,7 @@ func (k *pkcs11MLKEMKeyPair) Encapsulate(sharedSecretAttrs AttributeSet) ([]byte
 	var ciphertext []byte
 	var ss *MLKEMSharedSecret
 	err := k.context.withSession(func(session *pkcs11Session) error {
-		mech := []*pkcs11.Mechanism{pkcs11.NewMechanism(pkcs11.CKM_ML_KEM, nil)}
+		mech := pkcs11.NewMechanism(pkcs11.CKM_ML_KEM, nil)
 		ct, ssHandle, err := session.ctx.EncapsulateKey(
 			session.handle, mech, k.pubKeyHandle, sharedSecretAttrs.ToSlice())
 		if err != nil {
@@ -141,7 +141,7 @@ func (k *pkcs11MLKEMKeyPair) Encapsulate(sharedSecretAttrs AttributeSet) ([]byte
 func (k *pkcs11MLKEMKeyPair) Decapsulate(ciphertext []byte, sharedSecretAttrs AttributeSet) (*MLKEMSharedSecret, error) {
 	var ss *MLKEMSharedSecret
 	err := k.context.withSession(func(session *pkcs11Session) error {
-		mech := []*pkcs11.Mechanism{pkcs11.NewMechanism(pkcs11.CKM_ML_KEM, nil)}
+		mech := pkcs11.NewMechanism(pkcs11.CKM_ML_KEM, nil)
 		ssHandle, err := session.ctx.DecapsulateKey(
 			session.handle, mech, k.handle, sharedSecretAttrs.ToSlice(), ciphertext)
 		if err != nil {
@@ -204,7 +204,7 @@ func (c *Context) GenerateMLKEMKeyPairWithAttributes(public, private AttributeSe
 			pkcs11.NewAttribute(pkcs11.CKA_DECAPSULATE, true),
 			pkcs11.NewAttribute(pkcs11.CKA_PARAMETER_SET, paramSet),
 		})
-		mech := []*pkcs11.Mechanism{pkcs11.NewMechanism(pkcs11.CKM_ML_KEM_KEY_PAIR_GEN, nil)}
+		mech := pkcs11.NewMechanism(pkcs11.CKM_ML_KEM_KEY_PAIR_GEN, nil)
 		pubHandle, privHandle, err := session.ctx.GenerateKeyPair(
 			session.handle, mech, public.ToSlice(), private.ToSlice())
 		if err != nil {

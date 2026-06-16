@@ -25,7 +25,7 @@ import (
 	"errors"
 	"hash"
 
-	"github.com/miekg/pkcs11"
+	pkcs11 "github.com/eclipse-keypont/pkcs11-go/cryptoki"
 )
 
 const (
@@ -68,7 +68,7 @@ type hmacImplementation struct {
 	blockSize int
 
 	// PKCS#11 mechanism information
-	mechDescription []*pkcs11.Mechanism
+	mechDescription *pkcs11.Mechanism
 
 	// Cleanup function
 	cleanup func()
@@ -136,7 +136,7 @@ func (key *SecretKey) NewHMAC(mech int, length int) (hash.Hash, error) {
 	} else {
 		hi.size = length
 	}
-	hi.mechDescription = []*pkcs11.Mechanism{pkcs11.NewMechanism(uint(mech), params)}
+	hi.mechDescription = pkcs11.NewMechanism(uint(mech), params)
 	if err := hi.initialize(); err != nil {
 		return nil, err
 	}

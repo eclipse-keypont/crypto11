@@ -25,7 +25,7 @@ import (
 	"crypto/cipher"
 	"runtime"
 
-	"github.com/miekg/pkcs11"
+	pkcs11 "github.com/eclipse-keypont/pkcs11-go/cryptoki"
 )
 
 // cipher.BlockMode -----------------------------------------------------
@@ -119,7 +119,7 @@ func (key *SecretKey) newBlockModeCloser(mech uint, mode int, iv []byte, setFina
 			key.context.pool.Put(session)
 		},
 	}
-	mechDescription := []*pkcs11.Mechanism{pkcs11.NewMechanism(mech, iv)}
+	mechDescription := pkcs11.NewMechanism(mech, iv)
 
 	switch mode {
 	case modeDecrypt:

@@ -27,7 +27,7 @@ import (
 	"math/big"
 	"unsafe"
 
-	"github.com/miekg/pkcs11"
+	pkcs11 "github.com/eclipse-keypont/pkcs11-go/cryptoki"
 	"github.com/pkg/errors"
 )
 
@@ -105,7 +105,7 @@ func (c *Context) dsaGeneric(key pkcs11.ObjectHandle, mechanism uint, digest []b
 	var err error
 	var sigBytes []byte
 	var sig dsaSignature
-	mech := []*pkcs11.Mechanism{pkcs11.NewMechanism(mechanism, nil)}
+	mech := pkcs11.NewMechanism(mechanism, nil)
 	err = c.withSession(func(session *pkcs11Session) error {
 		if err = c.ctx.SignInit(session.handle, mech, key); err != nil {
 			return err

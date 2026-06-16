@@ -13,7 +13,7 @@ func skipIfMechUnsupported(t *testing.T, ctx *Context, wantMech uint) {
 	require.NoError(t, err)
 
 	for _, mech := range mechs {
-		if mech.Mechanism == wantMech {
+		if mech == wantMech {
 			return
 		}
 	}

@@ -93,11 +93,12 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
 
-	"github.com/miekg/pkcs11"
+	pkcs11 "github.com/eclipse-keypont/pkcs11-go/cryptoki"
 	"github.com/pkg/errors"
 	"github.com/thales-e-security/pool"
 )
@@ -175,7 +176,7 @@ type Context struct {
 	cfg *Config
 
 	token *pkcs11.TokenInfo
-	slot  uint
+	slot  pkcs11.SlotID
 	pool  *pool.ResourcePool
 
 	// persistentSession is a session held open so we can be confident handles and login status
@@ -226,7 +227,7 @@ type RSAPrivateKey interface {
 }
 
 // findToken finds a token given exactly one of serial, label or slotNumber
-func (c *Context) findToken(slots []uint, serial, label string, slotNumber *int) (uint, *pkcs11.TokenInfo, error) {
+func (c *Context) findToken(slots []pkcs11.SlotID, serial, label string, slotNumber *int) (pkcs11.SlotID, *pkcs11.TokenInfo, error) {
 	for _, slot := range slots {
 
 		tokenInfo, err := c.ctx.GetTokenInfo(slot)
@@ -234,7 +235,7 @@ func (c *Context) findToken(slots []uint, serial, label string, slotNumber *int)
 			return 0, nil, err
 		}
 
-		if (slotNumber != nil && uint(*slotNumber) == slot) ||
+		if (slotNumber != nil && pkcs11.SlotID(*slotNumber) == slot) ||
 			(tokenInfo.SerialNumber != "" && tokenInfo.SerialNumber == serial) ||
 			(tokenInfo.Label != "" && tokenInfo.Label == label) {
 
@@ -328,9 +329,13 @@ func openModule(path string) (moduleCtx, error) {
 		return mod.ctx, nil
 	}
 
-	ctx := pkcs11.New(path)
-	if ctx == nil {
-		return moduleCtx{}, errors.New("failed to open module")
+	absPath, err := filepath.Abs(path)
+	if err != nil {
+		return moduleCtx{}, fmt.Errorf("failed to resolve module path: %w", err)
+	}
+	ctx, err := pkcs11.New(absPath)
+	if err != nil {
+		return moduleCtx{}, errors.WithMessage(err, "failed to open module")
 	}
 
 	if err := ctx.Initialize(); err != nil {
@@ -465,9 +470,9 @@ func Configure(config *Config) (*Context, error) {
 		// Try to log in our persistent session. This may fail with CKR_USER_ALREADY_LOGGED_IN if another instance
 		// already exists.
 		if instance.cfg.UserType == 1 {
-			err = instance.ctx.Login(instance.persistentSession, pkcs11.CKU_USER, instance.cfg.Pin)
+			err = instance.ctx.Login(instance.persistentSession, pkcs11.CKU_USER, []byte(instance.cfg.Pin))
 		} else {
-			err = instance.ctx.Login(instance.persistentSession, CryptoUser, instance.cfg.Pin)
+			err = instance.ctx.Login(instance.persistentSession, CryptoUser, []byte(instance.cfg.Pin))
 		}
 		if err != nil {
 
