@@ -3,4 +3,7 @@ crypto11.test
 demo/*.pem
 demo/demo
 /.idea/
+.vscode/
+
 /vendor/
+.env
