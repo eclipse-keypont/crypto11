@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2026 Thales Group
+// SPDX-FileCopyrightText: 2026 Thales Group and the crypto11 Contributors
 // SPDX-License-Identifier: MIT
 
 package crypto11
