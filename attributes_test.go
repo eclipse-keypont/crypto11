@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Thales Group
+// SPDX-License-Identifier: MIT
+
 package crypto11
 
 import (
