@@ -7,3 +7,7 @@ demo/demo
 
 /vendor/
 .env
+
+# ignore local changes of crypto11.config.json that a user configures to run
+# tests. The user modiiesy the local config with a local PATH for SoftHSMv3.
+crypto11.config.json
