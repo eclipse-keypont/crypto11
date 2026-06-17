@@ -41,13 +41,26 @@ func bytesToUlong(bs []byte) (n uint) {
 		return 0
 	}
 
-	value := *(*uint)(unsafe.Pointer(&bs[0]))
-	if sliceSize > C.sizeof_ulong {
+	// Copy into a fixed-size, zero-padded buffer before reinterpreting. The
+	// previous implementation dereferenced *(*uint)(&bs[0]), which always reads
+	// sizeof(CK_ULONG) bytes and therefore read past the end of any slice
+	// shorter than that — an out-of-bounds read (undefined behaviour, and a
+	// potential crash at a page boundary or adjacent-memory disclosure). A
+	// PKCS#11 attribute such as a 4-byte CKA_PARAMETER_SET triggered exactly
+	// this. Copy clamps to the available bytes and zero-fills the rest.
+	var buf [C.sizeof_ulong]byte
+	copyLen := sliceSize
+	if copyLen > C.sizeof_ulong {
+		copyLen = C.sizeof_ulong
+	}
+	copy(buf[:], bs[:copyLen])
+	value := *(*uint)(unsafe.Pointer(&buf[0]))
+
+	if sliceSize >= C.sizeof_ulong {
 		return value
 	}
 
-	// truncate the value to the # of bits present in the byte slice since
-	// the unsafe pointer will always grab/convert ULONG # of bytes
+	// Mask to the number of bits actually supplied by the (shorter) slice.
 	var mask uint
 	for i := 0; i < sliceSize; i++ {
 		mask |= 0xff << uint(i*8)

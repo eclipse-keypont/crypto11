@@ -133,10 +133,14 @@ type pkcs11Object struct {
 }
 
 func (o *pkcs11Object) Delete() error {
-	return o.context.withSession(func(session *pkcs11Session) error {
+	err := o.context.withSession(func(session *pkcs11Session) error {
 		err := session.ctx.DestroyObject(session.handle, o.handle)
 		return errors.WithMessage(err, "failed to destroy key")
 	})
+	if err == nil {
+		o.handle = pkcs11.CK_INVALID_HANDLE
+	}
+	return err
 }
 
 // pkcs11PrivateKey contains a reference to a loaded PKCS#11 private key object.
@@ -158,10 +162,14 @@ func (k *pkcs11PrivateKey) Delete() error {
 		return err
 	}
 
-	return k.context.withSession(func(session *pkcs11Session) error {
+	err = k.context.withSession(func(session *pkcs11Session) error {
 		err := session.ctx.DestroyObject(session.handle, k.pubKeyHandle)
 		return errors.WithMessage(err, "failed to destroy public key")
 	})
+	if err == nil {
+		k.pubKeyHandle = pkcs11.CK_INVALID_HANDLE
+	}
+	return err
 }
 
 // A Context stores the connection state to a PKCS#11 token. Use Configure or ConfigureFromFile to create a new
@@ -171,6 +179,9 @@ func (k *pkcs11PrivateKey) Delete() error {
 type Context struct {
 	// Atomic fields must be at top (according to the package owners)
 	closed pool.AtomicBool
+
+	// closeOnce makes Close idempotent.
+	closeOnce sync.Once
 
 	ctx moduleCtx
 	cfg *Config
@@ -319,9 +330,20 @@ func openModule(path string) (moduleCtx, error) {
 	moduleReferencesMutex.Lock()
 	defer moduleReferencesMutex.Unlock()
 
-	if mod, ok := moduleReferences[path]; ok {
+	// Normalise to an absolute path BEFORE consulting the cache. The cache key
+	// and the actual library load must agree; otherwise two callers using
+	// different spellings of the same library ("./lib.so" vs "/opt/lib.so")
+	// would each open and C_Initialize the module separately, and the second
+	// C_Initialize fails with CKR_CRYPTOKI_ALREADY_INITIALIZED. pkcs11-go also
+	// requires an absolute path.
+	absPath, err := filepath.Abs(path)
+	if err != nil {
+		return moduleCtx{}, fmt.Errorf("failed to resolve module path: %w", err)
+	}
+
+	if mod, ok := moduleReferences[absPath]; ok {
 		// Module with given path has been already initialized.
-		moduleReferences[path] = moduleRef{
+		moduleReferences[absPath] = moduleRef{
 			ctx:      mod.ctx,
 			refCount: mod.refCount + 1,
 		}
@@ -329,10 +351,6 @@ func openModule(path string) (moduleCtx, error) {
 		return mod.ctx, nil
 	}
 
-	absPath, err := filepath.Abs(path)
-	if err != nil {
-		return moduleCtx{}, fmt.Errorf("failed to resolve module path: %w", err)
-	}
 	ctx, err := pkcs11.New(absPath)
 	if err != nil {
 		return moduleCtx{}, errors.WithMessage(err, "failed to open module")
@@ -344,7 +362,7 @@ func openModule(path string) (moduleCtx, error) {
 	}
 
 	modCtx := moduleCtx{ctx}
-	moduleReferences[path] = moduleRef{
+	moduleReferences[absPath] = moduleRef{
 		ctx:      modCtx,
 		refCount: 1,
 	}
@@ -412,6 +430,12 @@ func Configure(config *Config) (*Context, error) {
 		return nil, fmt.Errorf("config must specify exactly one way to select a token: %v given", strings.Join(fields, ", "))
 	}
 
+	// Work on a private copy so that callers can reuse their Config after
+	// Configure returns and are never surprised by our default-filling or PIN
+	// clearing.
+	cfgCopy := *config
+	config = &cfgCopy
+
 	if config.MaxSessions == 0 {
 		config.MaxSessions = DefaultMaxSessions
 	}
@@ -469,11 +493,17 @@ func Configure(config *Config) (*Context, error) {
 	if !config.LoginNotSupported {
 		// Try to log in our persistent session. This may fail with CKR_USER_ALREADY_LOGGED_IN if another instance
 		// already exists.
+		//
+		// Hold the PIN in a []byte only for the duration of the login call and
+		// wipe it immediately afterwards, so the secret does not linger in a
+		// heap buffer for the lifetime of the process.
+		pin := []byte(instance.cfg.Pin)
 		if instance.cfg.UserType == 1 {
-			err = instance.ctx.Login(instance.persistentSession, pkcs11.CKU_USER, []byte(instance.cfg.Pin))
+			err = instance.ctx.Login(instance.persistentSession, pkcs11.CKU_USER, pin)
 		} else {
-			err = instance.ctx.Login(instance.persistentSession, CryptoUser, []byte(instance.cfg.Pin))
+			err = instance.ctx.Login(instance.persistentSession, CryptoUser, pin)
 		}
+		pkcs11.Wipe(pin)
 		if err != nil {
 
 			pErr, isP11Error := err.(pkcs11.Error)
@@ -484,6 +514,10 @@ func Configure(config *Config) (*Context, error) {
 			}
 		}
 	}
+
+	// Drop our reference to the PIN string now that login is complete; it is no
+	// longer needed and there is no reason to keep the secret reachable.
+	instance.cfg.Pin = ""
 
 	return instance, nil
 }
@@ -542,19 +576,25 @@ func loadConfigFromFile(configLocation string) (*Config, error) {
 
 // Close releases resources used by the Context and unloads the PKCS #11 library if there are no other
 // Contexts using it. Close blocks until existing operations have finished. A closed Context cannot be reused.
+// Close is idempotent: calling it more than once is safe and returns nil on subsequent calls.
 func (c *Context) Close() error {
-	c.closed.Set(true)
+	// sync.Once guarantees the teardown runs exactly once even if Close is
+	// called concurrently or repeatedly. Running it twice would double-close the
+	// pool and trip moduleCtx.Close's refcount panic.
+	c.closeOnce.Do(func() {
+		c.closed.Set(true)
 
-	// Block until all resources returned to pool
-	c.pool.Close()
+		// Block until all resources returned to pool
+		c.pool.Close()
 
-	// Close our long-term session. We ignore any returned error,
-	// since we plan to kill our collection to the library anyway.
-	_ = c.ctx.CloseSession(c.persistentSession)
+		// Close our long-term session. We ignore any returned error,
+		// since we plan to kill our collection to the library anyway.
+		_ = c.ctx.CloseSession(c.persistentSession)
 
-	// Drop reference to the held context. May destroy the module instance
-	// if this is the last reference to it.
-	c.ctx.Close()
+		// Drop reference to the held context. May destroy the module instance
+		// if this is the last reference to it.
+		c.ctx.Close()
+	})
 
 	return nil
 }

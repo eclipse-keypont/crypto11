@@ -54,6 +54,12 @@ type MLKEMSharedSecret struct {
 
 // Bytes extracts the raw shared secret value from the token.
 // The key must have been created with CKA_EXTRACTABLE = true in the shared secret template.
+//
+// Security note: extracting the shared secret pulls sensitive key material out
+// of the HSM into ordinary (garbage-collected, swappable) process memory, which
+// defeats the protection the HSM provides. Prefer keeping the derived key on the
+// token and using its handle for subsequent operations. If you must extract,
+// wipe the returned slice (pkcs11.Wipe) as soon as you are done with it.
 func (s *MLKEMSharedSecret) Bytes() ([]byte, error) {
 	var raw []byte
 	err := s.context.withSession(func(session *pkcs11Session) error {
@@ -61,6 +67,12 @@ func (s *MLKEMSharedSecret) Bytes() ([]byte, error) {
 			[]*pkcs11.Attribute{pkcs11.NewAttribute(pkcs11.CKA_VALUE, nil)})
 		if err != nil {
 			return err
+		}
+		if len(attrs) == 0 || attrs[0].Value == nil {
+			// The token returned no value — typically because the key is
+			// sensitive / non-extractable. Surface a clear error instead of
+			// indexing into an empty result or returning a silent empty secret.
+			return fmt.Errorf("shared secret value is unavailable (key not extractable?)")
 		}
 		raw = append([]byte(nil), attrs[0].Value...)
 		return nil
@@ -106,10 +118,14 @@ func (k *pkcs11MLKEMKeyPair) Delete() error {
 	if err := k.pkcs11Object.Delete(); err != nil {
 		return err
 	}
-	return k.context.withSession(func(session *pkcs11Session) error {
+	err := k.context.withSession(func(session *pkcs11Session) error {
 		err := session.ctx.DestroyObject(session.handle, k.pubKeyHandle)
 		return errors.WithMessage(err, "failed to destroy ML-KEM public key")
 	})
+	if err == nil {
+		k.pubKeyHandle = pkcs11.CK_INVALID_HANDLE
+	}
+	return err
 }
 
 // ParameterSet returns the ML-KEM security level for this key pair.
@@ -181,12 +197,20 @@ func (c *Context) GenerateMLKEMKeyPairWithLabel(id, label []byte, paramSet MLKEM
 	return c.GenerateMLKEMKeyPairWithAttributes(public, private, paramSet)
 }
 
+// validMLKEMParameterSet reports whether p is one of the three FIPS 203 levels.
+func validMLKEMParameterSet(p MLKEMParameterSet) bool {
+	return p == MLKEM512 || p == MLKEM768 || p == MLKEM1024
+}
+
 // GenerateMLKEMKeyPairWithAttributes generates an ML-KEM key pair on the token. After this
 // function returns, public and private will contain the attributes applied to the key pair.
 // If required attributes are missing they will be set to a default value.
 func (c *Context) GenerateMLKEMKeyPairWithAttributes(public, private AttributeSet, paramSet MLKEMParameterSet) (MLKEMKeyPair, error) {
 	if c.closed.Get() {
 		return nil, errClosed
+	}
+	if !validMLKEMParameterSet(paramSet) {
+		return nil, fmt.Errorf("invalid ML-KEM parameter set %#x (expected MLKEM512, MLKEM768 or MLKEM1024)", paramSet)
 	}
 	var k MLKEMKeyPair
 	err := c.withSession(func(session *pkcs11Session) error {

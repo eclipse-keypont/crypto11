@@ -114,10 +114,19 @@ func (g genericAead) Seal(dst, nonce, plaintext, additionalData []byte) []byte {
 			return
 		}
 
-		if g.key.context.cfg.UseGCMIVFromHSM && g.key.context.cfg.GCMIVFromHSMControl.SupplyIvForHSMGCMEncrypt {
-			if len(nonce) != len(params.IV()) {
+		// When the token generates its own GCM IV (UseGCMIVFromHSM), the actual
+		// IV used is written by the token into the CK_GCM_PARAMS buffer. We MUST
+		// copy it back into the caller's nonce slice, otherwise the caller never
+		// learns the IV and the ciphertext cannot be decrypted — or, worse, the
+		// caller assumes a zero/garbage nonce was used, risking catastrophic GCM
+		// nonce reuse. This must happen whenever UseGCMIVFromHSM is set,
+		// independently of the SupplyIvForHSMGCMEncrypt buffer-management flag.
+		if g.key.context.cfg.UseGCMIVFromHSM {
+			hsmIV := params.IV()
+			if len(nonce) != len(hsmIV) {
 				return errBadGCMNonceSize
 			}
+			copy(nonce, hsmIV)
 		}
 
 		return
