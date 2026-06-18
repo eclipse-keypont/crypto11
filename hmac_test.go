@@ -37,20 +37,17 @@ func TestHmac(t *testing.T) {
 		require.NoError(t, err)
 	}()
 
-	info, err := ctx.ctx.GetInfo()
-	require.NoError(t, err)
-
-	if info.ManufacturerID == "SoftHSM" {
-		t.Skipf("HMAC not implemented on SoftHSM")
-	}
+	// The hash-independent subtests (Empty/MultiSum/Reset) run once, under the plain SHA256
+	// case, so they exercise a mechanism most (all?) HSMs support. The _GENERAL cases are
+	// skipped there (skipIfMechUnsupported) as SoftHSM has no _GENERAL variants.
 	t.Run("HMACSHA1", func(t *testing.T) {
 		testHmac(t, ctx, "hmac1", pkcs11.CKK_SHA_1_HMAC, pkcs11.CKM_SHA_1_HMAC, 0, 20, false)
 	})
 	t.Run("HMACSHA1General", func(t *testing.T) {
-		testHmac(t, ctx, "hmac1", pkcs11.CKK_SHA_1_HMAC, pkcs11.CKM_SHA_1_HMAC_GENERAL, 10, 10, true)
+		testHmac(t, ctx, "hmac1", pkcs11.CKK_SHA_1_HMAC, pkcs11.CKM_SHA_1_HMAC_GENERAL, 10, 10, false)
 	})
 	t.Run("HMACSHA256", func(t *testing.T) {
-		testHmac(t, ctx, "hmac0", pkcs11.CKK_SHA256_HMAC, pkcs11.CKM_SHA256_HMAC, 0, 32, false)
+		testHmac(t, ctx, "hmac0", pkcs11.CKK_SHA256_HMAC, pkcs11.CKM_SHA256_HMAC, 0, 32, true)
 	})
 
 }
