@@ -1,0 +1,32 @@
+# Keeps Go modules and the GitHub Actions used by the workflows up to date,
+# opening grouped weekly PRs that the CI / security gates then vet.
+#
+# Note: the pkcs11-go dependency is pinned via a local `replace` directive in
+# go.mod and is not tracked here — only registry-resolved modules are.
+version: 2
+updates:
+  - package-ecosystem: gomod
+    directory: "/"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 10
+    labels:
+      - dependencies
+      - go
+    groups:
+      go-modules:
+        patterns:
+          - "*"
+
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 10
+    labels:
+      - dependencies
+      - github-actions
+    groups:
+      github-actions:
+        patterns:
+          - "*"

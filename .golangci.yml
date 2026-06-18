@@ -1,0 +1,45 @@
+# golangci-lint configuration (v2 schema).
+# Run locally with: golangci-lint run
+# Docs: https://golangci-lint.run/
+version: "2"
+
+linters:
+  enable:
+    # Defaults (errcheck, govet, ineffassign, staticcheck, unused) stay on.
+    - bodyclose      # checks HTTP response bodies are closed
+    - gosec          # security-focused checks (relevant for a crypto lib)
+    - misspell       # catches common spelling mistakes in comments/strings
+    - revive         # fast, configurable replacement for golint
+    - unconvert      # flags unnecessary type conversions
+    - unparam        # reports unused function parameters
+    - errorlint      # finds problems with Go 1.13+ error wrapping
+    - nilerr         # returning nil when an error is non-nil
+    - copyloopvar    # detects unnecessary loop-var copies (Go 1.22+)
+    - prealloc       # suggests slice preallocation
+
+  settings:
+    gosec:
+      excludes:
+        # G115: integer overflow on conversion — extremely noisy against the
+        # PKCS#11 C-style API (CK_ULONG <-> int). Re-enable if you want to
+        # audit those conversions explicitly.
+        - G115
+
+  exclusions:
+    generated: lax
+    rules:
+      # Test files exercise edge cases and intentionally ignore some errors.
+      - path: _test\.go
+        linters:
+          - errcheck
+          - gosec
+          - unparam
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
+  settings:
+    goimports:
+      local-prefixes:
+        - github.com/ThalesGroup/crypto11

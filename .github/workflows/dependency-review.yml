@@ -1,0 +1,27 @@
+name: Dependency Review
+
+# Gates pull requests: scans the dependency changes a PR introduces and fails
+# if it pulls in a known-vulnerable or disallowed-license package. Make this a
+# required status check in branch protection to block merges. Complements
+# Dependabot (which opens upgrade PRs) and govulncheck (which scans existing deps).
+
+on:
+  pull_request:
+    branches: [master]
+
+permissions:
+  contents: read
+
+jobs:
+  dependency-review:
+    name: Dependency Review
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Dependency Review
+        uses: actions/dependency-review-action@v4
+        with:
+          fail-on-severity: moderate
+          comment-summary-in-pr: on-failure

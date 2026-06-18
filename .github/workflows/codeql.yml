@@ -1,0 +1,51 @@
+name: CodeQL
+
+# Static application security testing (SAST) for Go. Complements govulncheck
+# (known-vulnerable deps) by finding issues in *this* code: unsafe crypto usage,
+# injection, data-flow and error-handling gaps. Results appear under
+# Security > Code scanning.
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+  schedule:
+    - cron: '18 6 * * 1'
+
+permissions:
+  contents: read
+
+env:
+  GOFLAGS: -mod=vendor
+
+jobs:
+  analyze:
+    name: Analyze (Go)
+    runs-on: ubuntu-latest
+    permissions:
+      security-events: write
+      actions: read
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: go
+          queries: security-and-quality
+
+      - name: Build
+        run: go build ./...
+
+      - name: Perform CodeQL analysis
+        uses: github/codeql-action/analyze@v3
+        with:
+          category: "/language:go"

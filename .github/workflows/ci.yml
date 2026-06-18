@@ -1,0 +1,55 @@
+name: CI
+
+# Build, vet and run the test suite against SoftHSM2. Dependencies resolve from
+# the committed vendor/ tree, so the pkcs11-go replace target needs no sibling
+# checkout. Replaces the legacy .travis.yml pipeline.
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+permissions:
+  contents: read
+
+env:
+  # Local `replace` directive (=> ../pkcs11-go) points at a sibling checkout
+  # that does not exist on the runner; resolve deps from the vendor/ tree.
+  GOFLAGS: -mod=vendor
+
+jobs:
+  build-test:
+    name: Build & test (SoftHSM2)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: Build
+        run: go build ./...
+
+      - name: Install SoftHSM2
+        run: sudo apt-get update && sudo apt-get install -y softhsm2
+
+      - name: Initialize SoftHSM2 tokens
+        run: |
+          echo "directories.tokendir = $(pwd)/tokens" > softhsm2.conf
+          echo "objectstore.backend = file" >> softhsm2.conf
+          mkdir -p tokens
+          export SOFTHSM2_CONF=$(pwd)/softhsm2.conf
+          echo "SOFTHSM2_CONF=$SOFTHSM2_CONF" >> "$GITHUB_ENV"
+          softhsm2-util --init-token --slot 0 --label token1 --so-pin sopassword --pin password
+          softhsm2-util --init-token --slot 1 --label token2 --so-pin sopassword --pin password
+
+      - name: Test
+        run: go test -v -bench . ./...
