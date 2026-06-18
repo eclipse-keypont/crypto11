@@ -55,6 +55,23 @@ func TestHmac(t *testing.T) {
 
 }
 
+// After a multi-part HMAC fails mid-operation, cleanup() releases the session and
+// nils it out. These tests cover the resulting dead-operation guards without an HSM:
+// a zero-value hmacImplementation has both session and result nil, the same state.
+func TestHmacWriteAfterSessionReleased(t *testing.T) {
+	hi := &hmacImplementation{}
+	n, err := hi.Write([]byte("data"))
+	require.Equal(t, errHmacClosed, err)
+	require.Zero(t, n)
+}
+
+func TestHmacSumAfterSessionReleased(t *testing.T) {
+	hi := &hmacImplementation{}
+	require.PanicsWithValue(t, errHmacClosed, func() {
+		hi.Sum(nil)
+	})
+}
+
 func testHmac(t *testing.T, ctx *Context, keyLabel string, keytype int, mech int, length int, xlength int, full bool) {
 
 	skipIfMechUnsupported(t, ctx, uint(mech))

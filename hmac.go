@@ -150,7 +150,14 @@ func (hi *hmacImplementation) initialize() (err error) {
 	}
 
 	hi.session = session
+	// Idempotent: a multi-part operation can fail at several points, each of which
+	// must release the session. Putting it back twice would hand the same session
+	// to two callers, so guard on the nil sentinel.
 	hi.cleanup = func() {
+		// Check if the session has already been cleared
+		if hi.session == nil {
+			return
+		}
 		hi.key.context.pool.Put(session)
 		hi.session = nil
 	}
@@ -170,7 +177,15 @@ func (hi *hmacImplementation) Write(p []byte) (n int, err error) {
 		}
 		return
 	}
+	if hi.session == nil {
+		// A previous step failed and released the session, meaning the operation is dead.
+		err = errHmacClosed
+		return
+	}
 	if err = hi.session.ctx.SignUpdate(hi.session.handle, p); err != nil {
+		// The operation is dead, so release the session here as Sum (which normally
+		// cleans up) will not complete.
+		hi.cleanup()
 		return
 	}
 	hi.updates++
@@ -180,6 +195,12 @@ func (hi *hmacImplementation) Write(p []byte) (n int, err error) {
 
 func (hi *hmacImplementation) Sum(b []byte) []byte {
 	if hi.result == nil {
+		if hi.session == nil {
+			// A previous step failed and released the session, so there is no result.
+			// Returning a (zero-length) value here would silently yield a bogus HMAC.
+			// Panic to match the existing finalize-failure behaviour instead.
+			panic(errHmacClosed)
+		}
 		var err error
 		if hi.updates == 0 {
 			// http://docs.oasis-open.org/pkcs11/pkcs11-base/v2.40/os/pkcs11-base-v2.40-os.html#_Toc322855304
@@ -191,6 +212,7 @@ func (hi *hmacImplementation) Sum(b []byte) []byte {
 		hi.result, err = hi.session.ctx.SignFinal(hi.session.handle)
 		hi.cleanup()
 		if err != nil {
+			hi.cleanup()
 			panic(err)
 		}
 	}
