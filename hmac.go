@@ -206,13 +206,13 @@ func (hi *hmacImplementation) Sum(b []byte) []byte {
 			// http://docs.oasis-open.org/pkcs11/pkcs11-base/v2.40/os/pkcs11-base-v2.40-os.html#_Toc322855304
 			// We must ensure that C_SignUpdate is called _at least once_.
 			if err = hi.session.ctx.SignUpdate(hi.session.handle, []byte{}); err != nil {
+				hi.cleanup()
 				panic(err)
 			}
 		}
 		hi.result, err = hi.session.ctx.SignFinal(hi.session.handle)
 		hi.cleanup()
 		if err != nil {
-			hi.cleanup()
 			panic(err)
 		}
 	}
