@@ -2,7 +2,12 @@ Crypto11
 ========
 
 [![GoDoc](https://godoc.org/github.com/ThalesIgnite/crypto11?status.svg)](https://godoc.org/github.com/ThalesIgnite/crypto11)
-[![Build Status](https://travis-ci.com/ThalesIgnite/crypto11.svg?branch=master)](https://travis-ci.com/ThalesIgnite/crypto11)
+[![Build](https://github.com/ThalesGroup/crypto11/actions/workflows/ci.yml/badge.svg)](https://github.com/ThalesGroup/crypto11/actions/workflows/ci.yml)
+[![Lint](https://github.com/ThalesGroup/crypto11/actions/workflows/lint.yml/badge.svg)](https://github.com/ThalesGroup/crypto11/actions/workflows/lint.yml)
+[![Secret Scan](https://github.com/ThalesGroup/crypto11/actions/workflows/secret-scan.yml/badge.svg)](https://github.com/ThalesGroup/crypto11/actions/workflows/secret-scan.yml)
+[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/ThalesGroup/crypto11/badge)](https://scorecard.dev/viewer/?uri=github.com/ThalesGroup/crypto11)
+[![Go Report Card](https://goreportcard.com/badge/github.com/ThalesGroup/crypto11)](https://goreportcard.com/report/github.com/ThalesGroup/crypto11)
+[![GitHub release](https://img.shields.io/github/v/release/ThalesGroup/crypto11)](https://github.com/ThalesGroup/crypto11/releases/latest)
 
 This is an implementation of the standard Golang crypto interfaces that
 uses [PKCS#11](http://docs.oasis-open.org/pkcs11/pkcs11-base/v2.40/errata01/os/pkcs11-base-v2.40-errata01-os-complete.html)
