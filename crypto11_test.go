@@ -256,7 +256,7 @@ func TestNoLogin(t *testing.T) {
 func TestInvalidPinDoesntDestroyLibrary(t *testing.T) {
 	// This test requires two separate tokens ("token1" and "token2") so that
 	// each has its own independent PKCS#11 slot login state.
-	// They are created automatically when SOFTHSM3_MODULE is set (see setup_test.go).
+	// They are created automatically when PKCS11_MODULE is set (see setup_test.go).
 	// In manual-setup environments without those tokens, we skip gracefully.
 	cfg, err := getConfig("crypto11.config.json")
 	require.NoError(t, err)
@@ -270,7 +270,7 @@ func TestInvalidPinDoesntDestroyLibrary(t *testing.T) {
 	// Configure context with valid configuration.
 	ctx1, err := Configure(cfg)
 	if err == errTokenNotFound {
-		t.Skip("tokens 'token1'/'token2' not found; set SOFTHSM3_MODULE to auto-provision")
+		t.Skip("tokens 'token1'/'token2' not found; set PKCS11_MODULE to auto-provision")
 	}
 	require.NoError(t, err)
 	defer ctx1.Close()

@@ -29,7 +29,7 @@ To verify signatures or encrypt messages, retrieve the public key and do it in s
 | ML-KEM 1024 | ✓ | ✓ | ✓ | FIPS 203 / PKCS#11 v3.2 (`CKM_ML_KEM`) |
 
 ML-KEM uses the `MLKEMEncapsulator` / `MLKEMDecapsulator` interfaces (not `crypto.Signer`).
-Requires a PKCS#11 v3.2-capable token such as [SoftHSMv3](https://github.com/pqctoday/softhsmv3).
+Requires a PKCS#11 v3.2-capable token such as [SoftHSMv3](https://github.com/pqctoday-org/pqctoday-hsm).
 
 ### Symmetric keys
 
@@ -163,17 +163,17 @@ noticed when testing with the v2.0.4 PKCS#11 library:
 Testing with SoftHSMv3 (recommended)
 -------------------------------------
 
-[SoftHSMv3](https://github.com/pqctoday/softhsmv3) supports PKCS#11 v3.2 and is required for
+[SoftHSMv3](https://github.com/pqctoday-org/pqctoday-hsm) supports PKCS#11 v3.2 and is required for
 ML-KEM and other post-quantum tests. Token provisioning is fully automated:
 
 ```sh
-SOFTHSM3_MODULE=/path/to/libsofthsmv3.so go test ./...
+PKCS11_MODULE=/path/to/libsofthsmv3.so go test ./...
 ```
 
 Override the user PIN (default `1234`):
 
 ```sh
-SOFTHSM3_MODULE=/path/to/libsofthsmv3.so SOFTHSM3_PIN=mypin go test ./...
+PKCS11_MODULE=/path/to/libsofthsmv3.so PKCS11_PIN=mypin go test ./...
 ```
 
 `TestMain` in `setup_test.go` creates three ephemeral tokens (`crypto11-test`, `token1`, `token2`)

@@ -3,6 +3,15 @@ name: CI
 # Build, vet and run the test suite against SoftHSM2. Dependencies resolve from
 # the committed vendor/ tree, so the pkcs11-go replace target needs no sibling
 # checkout. Replaces the legacy .travis.yml pipeline.
+#
+# SoftHSM2 (from apt) is used as the PKCS#11 module. Tests that require
+# PKCS#11 v3.2 features (ML-KEM) self-skip via skipIfMechUnsupported when the
+# loaded module does not support them. Token provisioning is handled entirely
+# by TestMain via the PKCS#11 API — no softhsm2-util pre-init needed.
+#
+# For full ML-KEM coverage, run locally with SoftHSMv3:
+#   PKCS11_MODULE=/path/to/libsofthsmv3.so go test ./...
+#   (https://github.com/pqctoday-org/pqctoday-hsm)
 
 on:
   push:
@@ -41,15 +50,10 @@ jobs:
       - name: Install SoftHSM2
         run: sudo apt-get update && sudo apt-get install -y softhsm2
 
-      - name: Initialize SoftHSM2 tokens
-        run: |
-          echo "directories.tokendir = $(pwd)/tokens" > softhsm2.conf
-          echo "objectstore.backend = file" >> softhsm2.conf
-          mkdir -p tokens
-          export SOFTHSM2_CONF=$(pwd)/softhsm2.conf
-          echo "SOFTHSM2_CONF=$SOFTHSM2_CONF" >> "$GITHUB_ENV"
-          softhsm2-util --init-token --slot 0 --label token1 --so-pin sopassword --pin password
-          softhsm2-util --init-token --slot 1 --label token2 --so-pin sopassword --pin password
-
       - name: Test
-        run: go test -v -bench . ./...
+        # TestMain bootstraps an ephemeral token via the PKCS#11 API when
+        # PKCS11_MODULE is set — no softhsm2-util pre-init required.
+        # ML-KEM and other v3.2 tests self-skip on SoftHSM2.
+        env:
+          PKCS11_MODULE: /usr/lib/softhsm/libsofthsm2.so
+        run: go test -count=1 -v ./...

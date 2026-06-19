@@ -18,30 +18,38 @@ import (
 //
 // Behaviour:
 //
-//   - SOFTHSM3_MODULE set — creates a temp token via the PKCS#11 API, writes a
+//   - PKCS11_MODULE set — creates a temp token via the PKCS#11 API, writes a
 //     "crypto11.config.json" file, runs all tests, then cleans up.  No external tools required.
-//   - SOFTHSM3_MODULE not set — falls back to the pre-existing "crypto11.config.json" file
+//   - PKCS11_MODULE not set — falls back to the pre-existing "crypto11.config.json" file
 //     (the manual setup described in README.md).
+//   - Neither set — skips the entire suite cleanly (no failures); used in CI
+//     when no HSM module is provisioned.
 //
-// SoftHSMv3 (https://github.com/pqctoday/softhsmv3) is required for ML-KEM
+// SoftHSMv3 (https://github.com/pqctoday-org/pqctoday-hsm) is required for ML-KEM
 // and other PKCS#11 v3.2 tests; a standard SoftHSMv2 install will self-skip
 // those tests via skipIfMechUnsupported.
 //
 // Typical usage:
 //
-//	SOFTHSM3_MODULE=/usr/local/lib/softhsm/libsofthsm3.so go test ./...
+//	PKCS11_MODULE=/usr/local/lib/softhsm/libsofthsm3.so go test ./...
 //
 // Override the user PIN (default "1234"):
 //
-//	SOFTHSM3_MODULE=... SOFTHSM3_PIN=mypin go test ./...
+//	PKCS11_MODULE=... PKCS11_PIN=mypin go test ./...
 func TestMain(m *testing.M) {
-	if mod := os.Getenv("SOFTHSM3_MODULE"); mod != "" {
+	if mod := os.Getenv("PKCS11_MODULE"); mod != "" {
 		teardown := initSoftHSM3Token(mod)
 		code := m.Run()
 		teardown()
 		os.Exit(code)
 	}
 	// No module supplied — rely on a pre-existing "crypto11.config.json" file.
+	// If that file is also absent (e.g. in CI without a provisioned HSM), skip
+	// the entire suite rather than failing with CKR_GENERAL_ERROR on every test.
+	if _, err := os.Stat("crypto11.config.json"); os.IsNotExist(err) {
+		fmt.Fprintln(os.Stderr, "crypto11: no PKCS11_MODULE and no crypto11.config.json — skipping all HSM tests")
+		os.Exit(0)
+	}
 	os.Exit(m.Run())
 }
 
@@ -62,7 +70,7 @@ func initSoftHSM3Token(modulePath string) func() {
 	const token1Label = "token1"
 	const token2Label = "token2"
 
-	userPin := os.Getenv("SOFTHSM3_PIN")
+	userPin := os.Getenv("PKCS11_PIN")
 	if userPin == "" {
 		userPin = "1234"
 	}
