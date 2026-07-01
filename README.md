@@ -314,6 +314,10 @@ Here are some topics we'd like to cover:
 
 * Full test instructions for additional PKCS#11 implementations.
 
+## Third-party notices
+
+[`NOTICES.md`](./NOTICES.md) lists all third-party dependency licenses and is auto-generated via `make notices` (requires [`go-licenses`](https://github.com/google/go-licenses)).
+
 ## Vulnerability check
 
 ```sh
