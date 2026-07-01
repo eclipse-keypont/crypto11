@@ -65,6 +65,17 @@ Installation
 
 Since v1.0.0, crypto11 requires Go v1.11+. Install the library by running:
 
+> **Note on Go version policy**
+>
+> crypto11 is a library. Bumping the `go` directive in `go.mod` raises the **minimum** Go version required by every project that imports it, which can break consumers still on older toolchains.
+>
+> To avoid this, we follow a two-directive pattern:
+> - `go X.Y.0` — the **minimum** Go version consumers need (kept conservative).
+> - `toolchain go X.Y.Z` — the **recommended** toolchain used by maintainers (tracks the latest patch release).
+>
+> This lets projects on older Go versions still import crypto11, while maintainers can develop and test with the latest toolchain.
+> See [#137](https://github.com/thales-transfer/crypto11/issues/137) for context.
+
 ```bash
 go get github.com/ThalesGroup/crypto11
 ```

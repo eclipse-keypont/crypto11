@@ -504,13 +504,6 @@ func Configure(config *Config) (*Context, error) {
 	return instance, nil
 }
 
-func min(a, b int) int {
-	if b < a {
-		return b
-	}
-	return a
-}
-
 // castDown returns orig as a signed integer. If an overflow would have occurred,
 // the maximum possible value is returned.
 func castDown(orig uint) int {
