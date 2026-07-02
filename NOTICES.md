@@ -5,4 +5,11 @@ This project uses the following third-party Go modules.
 | Package | License | License URL |
 |---------|---------|-------------|
 | `github.com/pkg/errors` | BSD-2-Clause | [Link](https://github.com/ThalesGroup/crypto11/blob/HEAD/vendor/github.com/pkg/errors/LICENSE) |
-| `github.com/thales-e-security/pool` | Apache-2.0 | [Link](https://github.com/ThalesGroup/crypto11/blob/HEAD/vendor/github.com/thales-e-security/pool/LICENSE) |
+
+## Vendored source (in-tree)
+
+The following code is copied directly into this repository and is not a Go module dependency, so it is not covered by the table above.
+
+| Path | Origin | License | License file |
+|------|--------|---------|--------------|
+| `internal/pool` | `github.com/thales-e-security/pool` (extracted from `vitess.io/vitess`) | Apache-2.0 | [internal/pool/LICENSE](internal/pool/LICENSE) |

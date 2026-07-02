@@ -7,8 +7,8 @@ import (
 	"context"
 	"errors"
 
+	"github.com/ThalesGroup/crypto11/internal/pool"
 	pkcs11 "github.com/eclipse-keypont/pkcs11-go/cryptoki"
-	"github.com/thales-e-security/pool"
 )
 
 // pkcs11Session wraps a PKCS#11 session handle so we can use it in a resource pool.

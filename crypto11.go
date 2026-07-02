@@ -80,9 +80,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ThalesGroup/crypto11/internal/pool"
 	pkcs11 "github.com/eclipse-keypont/pkcs11-go/cryptoki"
 	"github.com/pkg/errors"
-	"github.com/thales-e-security/pool"
 )
 
 const (
