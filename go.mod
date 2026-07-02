@@ -2,7 +2,7 @@ module github.com/ThalesGroup/crypto11
 
 go 1.25.0
 
-toolchain go1.26.1
+toolchain go1.26.4
 
 require (
 	github.com/eclipse-keypont/pkcs11-go v1.0.0
