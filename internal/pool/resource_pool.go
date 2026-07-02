@@ -40,7 +40,7 @@ type Resource interface {
 
 // ResourcePool allows you to use a pool of resources.
 type ResourcePool struct {
-	// stats. Atomic fields must remain at the top in order to prevent panics on certain architectures.
+	// stats
 	available  AtomicInt64
 	active     AtomicInt64
 	inUse      AtomicInt64
@@ -77,12 +77,12 @@ func NewResourcePool(factory Factory, capacity, maxCap int, idleTimeout time.Dur
 		panic(errors.New("invalid/out of range capacity"))
 	}
 	rp := &ResourcePool{
-		resources:   make(chan resourceWrapper, maxCap),
-		factory:     factory,
-		available:   NewAtomicInt64(int64(capacity)),
-		capacity:    NewAtomicInt64(int64(capacity)),
-		idleTimeout: NewAtomicDuration(idleTimeout),
+		resources: make(chan resourceWrapper, maxCap),
+		factory:   factory,
 	}
+	rp.available.Set(int64(capacity))
+	rp.capacity.Set(int64(capacity))
+	rp.idleTimeout.Set(idleTimeout)
 	for i := 0; i < capacity; i++ {
 		rp.resources <- resourceWrapper{}
 	}
