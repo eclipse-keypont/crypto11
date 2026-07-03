@@ -219,10 +219,10 @@ func (c *Context) makeKeyPair(session *pkcs11Session, privHandle *pkcs11.ObjectH
 		result.pkcs11PrivateKey.pubKey = pub
 		return result, certificate, nil
 
-	case pkcs11.CKK_ECDSA:
-		result := &pkcs11PrivateKeyECDSA{pkcs11PrivateKey: *resultPkcs11PrivateKey}
+	case pkcs11.CKK_EC:
+		result := &pkcs11PrivateKeyEC{pkcs11PrivateKey: *resultPkcs11PrivateKey}
 		if pubHandle != nil {
-			if pub, err = exportECDSAPublicKey(session, *pubHandle); err != nil {
+			if pub, err = exportECPublicKey(session, *pubHandle); err != nil {
 				return nil, nil, err
 			}
 			result.pkcs11PrivateKey.pubKeyHandle = *pubHandle

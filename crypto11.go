@@ -191,6 +191,17 @@ type Signer interface {
 	Delete() error
 }
 
+// Deriver is a PKCS#11 key that can be used to derive new keys.
+type Deriver interface {
+	// Derive derives a new key from the current key, using the supplied template and options. The template is used to specify
+	// attributes of the derived key, and the options are used to specify any parameters needed for the derivation.
+	Derive(template AttributeSet, cipher *SymmetricCipher, opts any) (*SecretKey, error)
+
+	Public() crypto.PublicKey
+
+	Delete() error
+}
+
 // SignerDecrypter is a PKCS#11 key implements crypto.Signer and crypto.Decrypter.
 type SignerDecrypter interface {
 	Signer

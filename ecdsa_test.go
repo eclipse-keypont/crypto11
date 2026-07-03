@@ -88,7 +88,7 @@ func TestHardECDSA(t *testing.T) {
 
 		key2, err := ctx.FindKeyPair(id, nil)
 		require.NoError(t, err)
-		testEcdsaSigning(t, key2.(*pkcs11PrivateKeyECDSA), crypto.SHA256, curve.Params().Name, "SHA-256")
+		testEcdsaSigning(t, key2, crypto.SHA256, curve.Params().Name, "SHA-256")
 
 		key3, err := ctx.FindKeyPair(nil, label)
 		require.NoError(t, err)

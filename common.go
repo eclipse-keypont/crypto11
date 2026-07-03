@@ -35,6 +35,10 @@ func ulongToBytes(n uint) []byte {
 	return C.GoBytes(unsafe.Pointer(&n), C.sizeof_ulong) // ugh!
 }
 
+func bytesToBool(bs []byte) bool {
+	return len(bs) > 0 && bs[0] != 0
+}
+
 func bytesToUlong(bs []byte) (n uint) {
 	sliceSize := len(bs)
 	if sliceSize == 0 {

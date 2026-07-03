@@ -205,6 +205,8 @@ func exportECDSAPublicKey(session *pkcs11Session, pubHandle pkcs11.ObjectHandle)
 // GenerateECDSAKeyPair creates a ECDSA key pair on the token using curve c. The id parameter is used to
 // set CKA_ID and must be non-nil. Only a limited set of named elliptic curves are supported. The
 // underlying PKCS#11 implementation may impose further restrictions.
+//
+// Deprecated: use [GenerateECKeyPair] instead to have more functionality.
 func (c *Context) GenerateECDSAKeyPair(id []byte, curve elliptic.Curve) (Signer, error) {
 	if c.closed.Get() {
 		return nil, errClosed
@@ -223,6 +225,8 @@ func (c *Context) GenerateECDSAKeyPair(id []byte, curve elliptic.Curve) (Signer,
 // GenerateECDSAKeyPairWithLabel creates a ECDSA key pair on the token using curve c. The id and label parameters are used to
 // set CKA_ID and CKA_LABEL respectively and must be non-nil. Only a limited set of named elliptic curves are supported. The
 // underlying PKCS#11 implementation may impose further restrictions.
+//
+// Deprecated: use [GenerateECKeyPairWithLabel] instead to have more functionality.
 func (c *Context) GenerateECDSAKeyPairWithLabel(id, label []byte, curve elliptic.Curve) (Signer, error) {
 	if c.closed.Get() {
 		return nil, errClosed
@@ -241,6 +245,8 @@ func (c *Context) GenerateECDSAKeyPairWithLabel(id, label []byte, curve elliptic
 // GenerateECDSAKeyPairWithAttributes generates an ECDSA key pair on the token. After this function returns, public and
 // private will contain the attributes applied to the key pair. If required attributes are missing, they will be set to
 // a default value.
+//
+// Deprecated: use [GenerateECKeyPairWithAttributes] instead to have more functionality.
 func (c *Context) GenerateECDSAKeyPairWithAttributes(public, private AttributeSet, curve elliptic.Curve) (Signer, error) {
 	if c.closed.Get() {
 		return nil, errClosed
