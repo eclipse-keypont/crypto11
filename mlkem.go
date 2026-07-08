@@ -249,7 +249,8 @@ func (c *Context) makeMLKEMKeyPair(session *pkcs11Session, privHandle *pkcs11.Ob
 	pubHandle, err := findKey(session, id, label, uintPtr(pkcs11.CKO_PUBLIC_KEY), &keyType)
 	if err != nil {
 		// Some tokens (e.g. CloudHSM) reject searches with an empty label attribute.
-		p11Err, ok := err.(pkcs11.Error)
+		var p11Err pkcs11.Error
+		ok := errors.As(err, &p11Err)
 		if len(label) == 0 && ok && p11Err == pkcs11.CKR_TEMPLATE_INCONSISTENT {
 			pubHandle, err = findKey(session, id, nil, uintPtr(pkcs11.CKO_PUBLIC_KEY), &keyType)
 			if err != nil {
@@ -344,7 +345,7 @@ func (c *Context) FindMLKEMKeyPairsWithAttributes(attributes AttributeSet) ([]ML
 
 		for _, privHandle := range privHandles {
 			k, err := c.makeMLKEMKeyPair(session, &privHandle)
-			if err == errNoCkaId || err == errNoPublicHalf {
+			if errors.Is(err, errNoCkaId) || errors.Is(err, errNoPublicHalf) {
 				continue
 			}
 			if err != nil {

@@ -115,7 +115,8 @@ func (c *Context) getKeyPair(session *pkcs11Session, privHandle *pkcs11.ObjectHa
 	// Find the public half which has a matching CKA_ID
 	pubHandle, err = findKey(session, id, label, uintPtr(pkcs11.CKO_PUBLIC_KEY), &keyType)
 	if err != nil {
-		p11Err, ok := err.(pkcs11.Error)
+		var p11Err pkcs11.Error
+		ok := errors.As(err, &p11Err)
 
 		if len(label) == 0 && ok && p11Err == pkcs11.CKR_TEMPLATE_INCONSISTENT {
 			// This probably means we are using a token that doesn't like us passing empty attributes in a template.
@@ -332,7 +333,7 @@ func (c *Context) FindKeyPairsWithAttributes(attributes AttributeSet) (signer []
 		for _, privHandle := range privHandles {
 			k, _, err := c.makeKeyPair(session, &privHandle)
 
-			if err == errNoCkaId || err == errNoPublicHalf {
+			if errors.Is(err, errNoCkaId) || errors.Is(err, errNoPublicHalf) {
 				continue
 			}
 			if err != nil {

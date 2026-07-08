@@ -11,6 +11,7 @@ import (
 	_ "crypto/sha1"
 	_ "crypto/sha256"
 	_ "crypto/sha512"
+	"errors"
 	"testing"
 
 	pkcs11 "github.com/eclipse-keypont/pkcs11-go/cryptoki"
@@ -88,7 +89,8 @@ func testEcdsaSigning(t *testing.T, key crypto.Signer, hashFunction crypto.Hash,
 
 	sigDER, err := key.Sign(rand.Reader, plaintextHash, nil)
 
-	p11Err, ok := err.(pkcs11.Error)
+	var p11Err pkcs11.Error
+	ok := errors.As(err, &p11Err)
 	if ok && p11Err == pkcs11.CKR_KEY_SIZE_RANGE {
 		// Returned by CloudHSM (at least), for key sizes it doesn't support.
 		t.Logf("Skipping unsupported curve %s and hash %s", curveName, hashName)

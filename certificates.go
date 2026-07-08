@@ -126,7 +126,7 @@ func (c *Context) FindAllPairedCertificates() (certificates []tls.Certificate, e
 
 			privateKey, certificate, err := c.makeKeyPair(session, &privHandle)
 
-			if err == errNoCkaId || err == errNoPublicHalf {
+			if errors.Is(err, errNoCkaId) || errors.Is(err, errNoPublicHalf) {
 				continue
 			}
 

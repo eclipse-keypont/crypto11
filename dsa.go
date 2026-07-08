@@ -163,5 +163,3 @@ func (signer *pkcs11PrivateKeyDSA) Sign(rand io.Reader, digest []byte, opts cryp
 //func (signer *pkcs11PrivateKeyDSA) Public() crypto.PublicKey {
 //	panic("Not implemented")
 //}
-
-

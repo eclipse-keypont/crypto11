@@ -88,11 +88,11 @@ func (g genericAead) Seal(dst, nonce, plaintext, additionalData []byte) []byte {
 		defer params.Free()
 
 		if err = session.ctx.EncryptInit(session.handle, mech, g.key.handle); err != nil {
-			err = fmt.Errorf("C_EncryptInit: %v", err)
+			err = fmt.Errorf("C_EncryptInit: %w", err)
 			return
 		}
 		if result, err = session.ctx.Encrypt(session.handle, plaintext); err != nil {
-			err = fmt.Errorf("C_Encrypt: %v", err)
+			err = fmt.Errorf("C_Encrypt: %w", err)
 			return
 		}
 
@@ -130,11 +130,11 @@ func (g genericAead) Open(dst, nonce, ciphertext, additionalData []byte) ([]byte
 		defer params.Free()
 
 		if err = session.ctx.DecryptInit(session.handle, mech, g.key.handle); err != nil {
-			err = fmt.Errorf("C_DecryptInit: %v", err)
+			err = fmt.Errorf("C_DecryptInit: %w", err)
 			return
 		}
 		if result, err = session.ctx.Decrypt(session.handle, ciphertext); err != nil {
-			err = fmt.Errorf("C_Decrypt: %v", err)
+			err = fmt.Errorf("C_Decrypt: %w", err)
 			return
 		}
 		return

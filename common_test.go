@@ -71,7 +71,7 @@ func createKey(ctx *Context, keyLabel string, keySize int, KeyType int) (key *Se
 	id := make([]byte, 16)
 	rand.Read(id)
 	if key, err = ctx.GenerateSecretKeyWithLabel(id, []byte(keyLabel), keySize, Ciphers[KeyType]); err != nil {
-		return nil, fmt.Errorf("error generating key with label '%s': %v", keyLabel, err)
+		return nil, fmt.Errorf("error generating key with label '%s': %w", keyLabel, err)
 	}
 	return key, nil
 }

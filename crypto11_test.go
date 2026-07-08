@@ -5,6 +5,7 @@ package crypto11
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"math/rand"
@@ -202,7 +203,7 @@ func TestAccessSameLibraryTwice(t *testing.T) {
 	err = ctx1.Close()
 	require.NoError(t, err)
 
-	// Try to find a non-existant key. We are just checking that we can
+	// Try to find a non-existent key. We are just checking that we can
 	// use the underlying P11 lib.
 	_, err = ctx2.FindKeys(randomBytes(), nil)
 	require.NoError(t, err)
@@ -214,7 +215,7 @@ func TestAccessSameLibraryTwice(t *testing.T) {
 	ctx3, err := ConfigureFromFile("crypto11.config.json")
 	require.NoError(t, err)
 
-	// Try to find a non-existant key. We are just checking that we can
+	// Try to find a non-existent key. We are just checking that we can
 	// use the underlying P11 lib.
 	_, err = ctx3.FindKeys(randomBytes(), nil)
 	require.NoError(t, err)
@@ -247,7 +248,8 @@ func TestNoLogin(t *testing.T) {
 	}
 	require.Error(t, err)
 
-	p11Err, ok := err.(pkcs11.Error)
+	var p11Err pkcs11.Error
+	ok := errors.As(err, &p11Err)
 	require.True(t, ok)
 
 	assert.Equal(t, pkcs11.Error(pkcs11.CKR_USER_NOT_LOGGED_IN), p11Err)
@@ -269,7 +271,7 @@ func TestInvalidPinDoesntDestroyLibrary(t *testing.T) {
 
 	// Configure context with valid configuration.
 	ctx1, err := Configure(cfg)
-	if err == errTokenNotFound {
+	if errors.Is(err, errTokenNotFound) {
 		t.Skip("tokens 'token1'/'token2' not found; set PKCS11_MODULE to auto-provision")
 	}
 	require.NoError(t, err)

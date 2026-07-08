@@ -7,8 +7,9 @@ import (
 	"context"
 	"errors"
 
-	"github.com/eclipse-keypont/crypto11/internal/pool"
 	pkcs11 "github.com/eclipse-keypont/pkcs11-go/cryptoki"
+
+	"github.com/eclipse-keypont/crypto11/internal/pool"
 )
 
 // pkcs11Session wraps a PKCS#11 session handle so we can use it in a resource pool.
@@ -47,7 +48,7 @@ func (c *Context) getSession() (*pkcs11Session, error) {
 	}
 
 	resource, err := c.pool.Get(ctx)
-	if err == pool.ErrClosed {
+	if errors.Is(err, pool.ErrClosed) {
 		// Our Context must have been closed, return a nicer error.
 		// We don't use errClosed to ensure our tests identify functions that aren't checking for closure
 		// correctly.
