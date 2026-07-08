@@ -1,13 +1,13 @@
 Crypto11
 ========
 
-[![GoDoc](https://godoc.org/github.com/ThalesIgnite/crypto11?status.svg)](https://godoc.org/github.com/ThalesIgnite/crypto11)
-[![Build](https://github.com/ThalesGroup/crypto11/actions/workflows/ci.yml/badge.svg)](https://github.com/ThalesGroup/crypto11/actions/workflows/ci.yml)
-[![Lint](https://github.com/ThalesGroup/crypto11/actions/workflows/lint.yml/badge.svg)](https://github.com/ThalesGroup/crypto11/actions/workflows/lint.yml)
-[![Secret Scan](https://github.com/ThalesGroup/crypto11/actions/workflows/secret-scan.yml/badge.svg)](https://github.com/ThalesGroup/crypto11/actions/workflows/secret-scan.yml)
-[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/ThalesGroup/crypto11/badge)](https://scorecard.dev/viewer/?uri=github.com/ThalesGroup/crypto11)
-[![Go Report Card](https://goreportcard.com/badge/github.com/ThalesGroup/crypto11)](https://goreportcard.com/report/github.com/ThalesGroup/crypto11)
-[![GitHub release](https://img.shields.io/github/v/release/ThalesGroup/crypto11)](https://github.com/ThalesGroup/crypto11/releases/latest)
+[![GoDoc](https://godoc.org/github.com/eclipse-keypont/crypto11?status.svg)](https://godoc.org/github.com/eclipse-keypont/crypto11)
+[![Build](https://github.com/eclipse-keypont/crypto11/actions/workflows/ci.yml/badge.svg)](https://github.com/eclipse-keypont/crypto11/actions/workflows/ci.yml)
+[![Lint](https://github.com/eclipse-keypont/crypto11/actions/workflows/lint.yml/badge.svg)](https://github.com/eclipse-keypont/crypto11/actions/workflows/lint.yml)
+[![Secret Scan](https://github.com/eclipse-keypont/crypto11/actions/workflows/secret-scan.yml/badge.svg)](https://github.com/eclipse-keypont/crypto11/actions/workflows/secret-scan.yml)
+[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/eclipse-keypont/crypto11/badge)](https://scorecard.dev/viewer/?uri=github.com/eclipse-keypont/crypto11)
+[![Go Report Card](https://goreportcard.com/badge/github.com/eclipse-keypont/crypto11)](https://goreportcard.com/report/github.com/eclipse-keypont/crypto11)
+[![GitHub release](https://img.shields.io/github/v/release/eclipse-keypont/crypto11)](https://github.com/eclipse-keypont/crypto11/releases/latest)
 
 This is an implementation of the standard Golang crypto interfaces that
 uses [PKCS#11](http://docs.oasis-open.org/pkcs11/pkcs11-base/v2.40/errata01/os/pkcs11-base-v2.40-errata01-os-complete.html)
@@ -56,7 +56,7 @@ Signing is done through the
 decryption through
 [crypto.Decrypter](https://golang.org/pkg/crypto/#Decrypter).
 
-See [the documentation](https://godoc.org/github.com/ThalesIgnite/crypto11) for details of various limitations,
+See [the documentation](https://godoc.org/github.com/eclipse-keypont/crypto11) for details of various limitations,
 especially regarding symmetric crypto.
 
 
@@ -77,12 +77,12 @@ Since v1.0.0, crypto11 requires Go v1.11+. Install the library by running:
 > See [#137](https://github.com/thales-transfer/crypto11/issues/137) for context.
 
 ```bash
-go get github.com/ThalesGroup/crypto11
+go get github.com/eclipse-keypont/crypto11
 ```
 
 The crypto11 library needs to be configured with information about your PKCS#11 installation. This is either done
 programmatically
-(see the `Config` struct in [the documentation](https://godoc.org/github.com/ThalesIgnite/crypto11)) or via a
+(see the `Config` struct in [the documentation](https://godoc.org/github.com/eclipse-keypont/crypto11)) or via a
 configuration
 file. The configuration file is a JSON representation of the `Config` struct.
 
@@ -208,7 +208,7 @@ support ML-KEM or other PKCS#11 v3.2 mechanisms (those tests will be skipped aut
 To set up a slot:
 
     $ cat softhsm2.conf
-    directories.tokendir = /home/rjk/go/src/github.com/ThalesIgnite/crypto11/tokens
+    directories.tokendir = /home/rjk/go/src/github.com/eclipse-keypont/crypto11/tokens
     objectstore.backend = file
     log.level = INFO
     $ mkdir tokens
@@ -305,13 +305,13 @@ Limitations
   is not implemented and an error is returned if it is nonzero.
   The reason for this is that it is not possible for crypto11 to guarantee the constant-time behavior in the
   specification.
-  See [issue #5](https://github.com/ThalesIgnite/crypto11/issues/5) for further discussion.
+  See [issue #5](https://github.com/eclipse-keypont/crypto11/issues/5) for further discussion.
 * Symmetric crypto support via [cipher.Block](https://golang.org/pkg/crypto/cipher/#Block) is very slow.
   You can use the `BlockModeCloser` API
   (over 400 times as fast on my computer)
   but you must call the Close()
   interface (not found in [cipher.BlockMode](https://golang.org/pkg/crypto/cipher/#BlockMode)).
-  See [issue #6](https://github.com/ThalesIgnite/crypto11/issues/6) for further discussion.
+  See [issue #6](https://github.com/eclipse-keypont/crypto11/issues/6) for further discussion.
 * Unit tests may interfere between them. You should fine tune and select the Go test file you want to run, one at a
   time.
 

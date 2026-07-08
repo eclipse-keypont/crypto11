@@ -7,7 +7,7 @@ import (
 	"context"
 	"errors"
 
-	"github.com/ThalesGroup/crypto11/internal/pool"
+	"github.com/eclipse-keypont/crypto11/internal/pool"
 	pkcs11 "github.com/eclipse-keypont/pkcs11-go/cryptoki"
 )
 

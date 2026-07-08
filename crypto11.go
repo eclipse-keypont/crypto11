@@ -61,12 +61,12 @@
 // The PKCS1v15DecryptOptions SessionKeyLen field is not implemented
 // and an error is returned if it is nonzero.
 // The reason for this is that it is not possible for crypto11 to guarantee the constant-time behavior in the specification.
-// See https://github.com/thalesignite/crypto11/issues/5 for further discussion.
+// See https://github.com/eclipse-keypont/crypto11/issues/5 for further discussion.
 //
 // Symmetric crypto support via cipher.Block is very slow.
 // You can use the BlockModeCloser API
 // but you must call the Close() interface (not found in cipher.BlockMode).
-// See https://github.com/ThalesIgnite/crypto11/issues/6 for further discussion.
+// See https://github.com/eclipse-keypont/crypto11/issues/6 for further discussion.
 package crypto11
 
 import (
@@ -80,7 +80,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ThalesGroup/crypto11/internal/pool"
+	"github.com/eclipse-keypont/crypto11/internal/pool"
 	pkcs11 "github.com/eclipse-keypont/pkcs11-go/cryptoki"
 	"github.com/pkg/errors"
 )
