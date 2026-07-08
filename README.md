@@ -1,12 +1,12 @@
 Crypto11
 ========
 
-[![GoDoc](https://godoc.org/github.com/eclipse-keypont/crypto11?status.svg)](https://godoc.org/github.com/eclipse-keypont/crypto11)
+[![Go Reference](https://pkg.go.dev/badge/github.com/eclipse-keypont/crypto11.svg)](https://pkg.go.dev/github.com/eclipse-keypont/crypto11)
 [![Build](https://github.com/eclipse-keypont/crypto11/actions/workflows/ci.yml/badge.svg)](https://github.com/eclipse-keypont/crypto11/actions/workflows/ci.yml)
 [![Lint](https://github.com/eclipse-keypont/crypto11/actions/workflows/lint.yml/badge.svg)](https://github.com/eclipse-keypont/crypto11/actions/workflows/lint.yml)
 [![Secret Scan](https://github.com/eclipse-keypont/crypto11/actions/workflows/secret-scan.yml/badge.svg)](https://github.com/eclipse-keypont/crypto11/actions/workflows/secret-scan.yml)
+[![Release](https://github.com/eclipse-keypont/crypto11/actions/workflows/release.yml/badge.svg)](https://github.com/eclipse-keypont/crypto11/actions/workflows/release.yml)
 [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/eclipse-keypont/crypto11/badge)](https://scorecard.dev/viewer/?uri=github.com/eclipse-keypont/crypto11)
-[![Go Report Card](https://goreportcard.com/badge/github.com/eclipse-keypont/crypto11)](https://goreportcard.com/report/github.com/eclipse-keypont/crypto11)
 [![GitHub release](https://img.shields.io/github/v/release/eclipse-keypont/crypto11)](https://github.com/eclipse-keypont/crypto11/releases/latest)
 
 This is an implementation of the standard Golang crypto interfaces that

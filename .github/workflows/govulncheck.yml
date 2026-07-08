@@ -13,6 +13,8 @@ on:
   schedule:
     - cron: '27 6 * * 1'
   workflow_dispatch:
+  # Allows the Release pipeline to gate a tag on a passing vulnerability scan.
+  workflow_call:
 
 permissions:
   contents: read
