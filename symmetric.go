@@ -326,10 +326,16 @@ func (c *Context) GenerateSecretKeyWithAttributes(template AttributeSet, bits in
 				return err
 			}
 
-			// nShield returns CKR_TEMPLATE_INCONSISTENT if if doesn't like the CKK/CKM combination.
-			// AWS CloudHSM returns CKR_ATTRIBUTE_VALUE_INVALID in the same circumstances.
+			// A token that doesn't recognise this CKK/CKM pairing should fall through to
+			// the next GenParams entry (e.g. the generic-secret fallback). The rejection
+			// code varies by vendor for the vendor-specific HMAC key-gen mechs: nShield
+			// returns CKR_TEMPLATE_INCONSISTENT, AWS CloudHSM CKR_ATTRIBUTE_VALUE_INVALID,
+			// SoftHSM CKR_MECHANISM_INVALID, and Utimaco CKR_ATTRIBUTE_TYPE_INVALID.
 			if e, ok := err.(pkcs11.Error); ok &&
-				e == pkcs11.CKR_TEMPLATE_INCONSISTENT || e == pkcs11.CKR_ATTRIBUTE_VALUE_INVALID {
+				(e == pkcs11.CKR_TEMPLATE_INCONSISTENT ||
+					e == pkcs11.CKR_ATTRIBUTE_VALUE_INVALID ||
+					e == pkcs11.CKR_MECHANISM_INVALID ||
+					e == pkcs11.CKR_ATTRIBUTE_TYPE_INVALID) {
 				continue
 			}
 
