@@ -248,7 +248,7 @@ func (c *Context) GenerateSecretKey(id []byte, bits int, cipher *SymmetricCipher
 	return c.GenerateSecretKeyWithAttributes(template, bits, cipher)
 }
 
-// GenerateSecretKey creates an secret key of given length and type. The id and label parameters are used to
+// GenerateSecretKeyWithLabel creates an secret key of given length and type. The id and label parameters are used to
 // set CKA_ID and CKA_LABEL respectively and must be non-nil.
 func (c *Context) GenerateSecretKeyWithLabel(id, label []byte, bits int, cipher *SymmetricCipher) (*SecretKey, error) {
 	if c.closed.Get() {
@@ -305,7 +305,8 @@ func (c *Context) GenerateSecretKeyWithAttributes(template AttributeSet, bits in
 
 			// As a special case, AWS CloudHSM does not accept CKA_ENCRYPT and CKA_DECRYPT on a
 			// Generic Secret key. If we are in that special case, try again without those attributes.
-			if e, ok := err.(pkcs11.Error); ok && e == pkcs11.CKR_ARGUMENTS_BAD && genMech.GenMech == pkcs11.CKM_GENERIC_SECRET_KEY_GEN {
+			var e pkcs11.Error
+			if errors.As(err, &e) && e == pkcs11.CKR_ARGUMENTS_BAD && genMech.GenMech == pkcs11.CKM_GENERIC_SECRET_KEY_GEN {
 				adjustedTemplate := template.Copy()
 				adjustedTemplate.Unset(CkaEncrypt)
 				adjustedTemplate.Unset(CkaDecrypt)
@@ -331,7 +332,7 @@ func (c *Context) GenerateSecretKeyWithAttributes(template AttributeSet, bits in
 			// code varies by vendor for the vendor-specific HMAC key-gen mechs: nShield
 			// returns CKR_TEMPLATE_INCONSISTENT, AWS CloudHSM CKR_ATTRIBUTE_VALUE_INVALID,
 			// SoftHSM CKR_MECHANISM_INVALID, and Utimaco CKR_ATTRIBUTE_TYPE_INVALID.
-			if e, ok := err.(pkcs11.Error); ok &&
+			if errors.As(err, &e) &&
 				(e == pkcs11.CKR_TEMPLATE_INCONSISTENT ||
 					e == pkcs11.CKR_ATTRIBUTE_VALUE_INVALID ||
 					e == pkcs11.CKR_MECHANISM_INVALID ||
