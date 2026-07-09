@@ -150,3 +150,28 @@ func TestEcdsaRequiredArgs(t *testing.T) {
 	_, err = ctx.GenerateECDSAKeyPairWithLabel(val, nil, elliptic.P224())
 	require.Error(t, err)
 }
+
+func TestEcdsaECDH1Derive(t *testing.T) {
+	ctx, err := ConfigureFromFile("config")
+	require.NoError(t, err)
+
+	defer func() {
+		require.NoError(t, ctx.Close())
+	}()
+
+	key1, err := ctx.GenerateECDSAKeyPair(randomBytes(), elliptic.P256())
+	require.NoError(t, err)
+	require.NotNil(t, key1)
+	defer key1.Delete()
+
+	key2, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	require.NoError(t, err)
+
+	d1, err := ctx.ECDH1Derive(key1, key2.Public().(crypto.PublicKey).(*ecdsa.PublicKey))
+	require.NoError(t, err)
+
+	pub := key1.Public().(crypto.PublicKey).(*ecdsa.PublicKey)
+	d2, _ := pub.Curve.ScalarMult(pub.X, pub.Y, key2.D.Bytes())
+
+	require.Equal(t, d1, d2.Bytes())
+}

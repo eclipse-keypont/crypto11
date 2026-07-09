@@ -265,6 +265,7 @@ func (c *Context) GenerateECDSAKeyPairWithAttributes(public, private AttributeSe
 			pkcs11.NewAttribute(pkcs11.CKA_SIGN, true),
 			pkcs11.NewAttribute(pkcs11.CKA_SENSITIVE, true),
 			pkcs11.NewAttribute(pkcs11.CKA_EXTRACTABLE, false),
+			pkcs11.NewAttribute(pkcs11.CKA_DERIVE, true),
 		})
 
 		mech := []*pkcs11.Mechanism{pkcs11.NewMechanism(pkcs11.CKM_ECDSA_KEY_PAIR_GEN, nil)}
@@ -292,6 +293,53 @@ func (c *Context) GenerateECDSAKeyPairWithAttributes(public, private AttributeSe
 		return nil
 	})
 	return k, err
+}
+
+// Perform CKM_ECDH1_DERIVE function with the given public key.
+//
+// This implementation set the derivation parameters to CKD_NULL and therefore
+// does not support ANSI X9.63 key ECDH derivation.
+func (c *Context) ECDH1Derive(pk Signer, pubkey *ecdsa.PublicKey) ([]byte, error) {
+	ecpk, ok := pk.(*pkcs11PrivateKeyECDSA)
+	if !ok {
+		return nil, errors.New("Private key is not ECDSA")
+	}
+
+	template := []*pkcs11.Attribute{
+		pkcs11.NewAttribute(pkcs11.CKA_TOKEN, false),
+		pkcs11.NewAttribute(pkcs11.CKA_CLASS, pkcs11.CKO_SECRET_KEY),
+		pkcs11.NewAttribute(pkcs11.CKA_KEY_TYPE, pkcs11.CKK_GENERIC_SECRET),
+		pkcs11.NewAttribute(pkcs11.CKA_SENSITIVE, false),
+		pkcs11.NewAttribute(pkcs11.CKA_EXTRACTABLE, true),
+		pkcs11.NewAttribute(pkcs11.CKA_ENCRYPT, true),
+		pkcs11.NewAttribute(pkcs11.CKA_DECRYPT, true),
+		pkcs11.NewAttribute(pkcs11.CKA_WRAP, true),
+		pkcs11.NewAttribute(pkcs11.CKA_UNWRAP, true),
+		pkcs11.NewAttribute(pkcs11.CKA_VALUE_LEN, (pubkey.Curve.Params().BitSize+7)/8),
+	}
+	params := pkcs11.ECDH1DeriveParams{KDF: pkcs11.CKD_NULL, PublicKeyData: elliptic.Marshal(pubkey.Curve, pubkey.X, pubkey.Y)}
+	mech := []*pkcs11.Mechanism{
+		pkcs11.NewMechanism(pkcs11.CKM_ECDH1_DERIVE, &params),
+	}
+
+	var buf []byte
+	err := c.withSession(func(session *pkcs11Session) error {
+		handle, err := session.ctx.DeriveKey(session.handle, mech, ecpk.handle, template)
+		if err != nil {
+			return err
+		}
+
+		template = []*pkcs11.Attribute{
+			pkcs11.NewAttribute(pkcs11.CKA_VALUE, nil),
+		}
+		attr, err := session.ctx.GetAttributeValue(session.handle, handle, template)
+		if err != nil {
+			return err
+		}
+		buf = attr[0].Value
+		return nil
+	})
+	return buf, err
 }
 
 // Sign signs a message using an ECDSA key.
