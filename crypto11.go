@@ -255,6 +255,9 @@ type Config struct {
 	// Full path to PKCS#11 library.
 	Path string
 
+	// pcks11.ctx
+	PKCS11Ctx *pkcs11.Ctx
+
 	// Token serial number.
 	TokenSerial string
 
@@ -422,10 +425,17 @@ func Configure(config *Config) (*Context, error) {
 		config.GCMIVLength = DefaultGCMIVLength
 	}
 
-	modCtx, err := openModule(config.Path)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create module context: %w", err)
+	var modCtx moduleCtx
+	if config.PKCS11Ctx != nil {
+		modCtx.Ctx = config.PKCS11Ctx
+	} else {
+		var err error
+		modCtx, err = openModule(config.Path)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create module context: %w", err)
+		}
 	}
+
 	instance := &Context{
 		cfg: config,
 		ctx: modCtx,
