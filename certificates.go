@@ -104,6 +104,7 @@ func (c *Context) FindCertificate(id []byte, label []byte, serial *big.Int) (*x5
 	return cert, err
 }
 
+// FindAllPairedCertificates finds all certificates on the token that have a matching private key.
 func (c *Context) FindAllPairedCertificates() (certificates []tls.Certificate, err error) {
 	if c.closed.Get() {
 		return nil, errClosed
@@ -126,7 +127,7 @@ func (c *Context) FindAllPairedCertificates() (certificates []tls.Certificate, e
 
 			privateKey, certificate, err := c.makeKeyPair(session, &privHandle)
 
-			if errors.Is(err, errNoCkaId) || errors.Is(err, errNoPublicHalf) {
+			if errors.Is(err, errNoCkaID) || errors.Is(err, errNoPublicHalf) {
 				continue
 			}
 

@@ -36,17 +36,17 @@ type curveInfo struct {
 	curve elliptic.Curve
 }
 
-func (k *pkcs11PrivateKeyECDSA) KeyType() uint {
+func (signer *pkcs11PrivateKeyECDSA) KeyType() uint {
 	return pkcs11.CKK_ECDSA
 }
 
 // ASN.1 marshal some value and panic on error
 func mustMarshal(val interface{}) []byte {
-	if b, err := asn1.Marshal(val); err != nil {
+	b, err := asn1.Marshal(val)
+	if err != nil {
 		panic(err)
-	} else {
-		return b
 	}
+	return b
 }
 
 // Note: some of these are outside what crypto/elliptic currently
@@ -283,6 +283,6 @@ func (c *Context) GenerateECDSAKeyPairWithAttributes(public, private AttributeSe
 // PKCS#11 expects to pick its own random data where necessary for signatures, so the rand argument is ignored.
 //
 // The return value is a DER-encoded byteblock.
-func (signer *pkcs11PrivateKeyECDSA) Sign(rand io.Reader, digest []byte, opts crypto.SignerOpts) ([]byte, error) {
+func (signer *pkcs11PrivateKeyECDSA) Sign(_ io.Reader, digest []byte, _ crypto.SignerOpts) ([]byte, error) {
 	return signer.context.dsaGeneric(signer.handle, pkcs11.CKM_ECDSA, digest)
 }

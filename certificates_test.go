@@ -81,10 +81,12 @@ func TestCertificateAttributes(t *testing.T) {
 
 	// Try to find with old serial
 	c, err := ctx.FindCertificate(nil, nil, cert.SerialNumber)
+	require.NoError(t, err)
 	assert.Nil(t, c)
 
 	// Find with new serial
 	c, err = ctx.FindCertificate(nil, nil, ourSerial)
+	require.NoError(t, err)
 	assert.NotNil(t, c)
 }
 

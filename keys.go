@@ -14,8 +14,8 @@ import (
 
 const maxHandlePerFind = 20
 
-// errNoCkaId is returned if a private key is found which has no CKA_ID attribute
-var errNoCkaId = errors.New("private key has no CKA_ID")
+// errNoCkaID is returned if a private key is found which has no CKA_ID attribute
+var errNoCkaID = errors.New("private key has no CKA_ID")
 
 // errNoPublicHalf is returned if a public half cannot be found to match a given private key
 var errNoPublicHalf = errors.New("could not find public key to match private key")
@@ -99,11 +99,11 @@ func (c *Context) getKeyPair(session *pkcs11Session, privHandle *pkcs11.ObjectHa
 
 	// Attributes must contain the key id or the key label to find it inside the keystore.
 	//if id == nil || len(id) == 0 {
-	//	return nil, 0, nil, nil, nil, errNoCkaId
+	//	return nil, 0, nil, nil, nil, errNoCkaID
 	//}
 	// Attributes must contain the key id or the key label to find it inside the keystore.
 	//if id == nil || len(id) == 0 {
-	//	return nil, 0, nil, nil, nil, errNoCkaId
+	//	return nil, 0, nil, nil, nil, errNoCkaID
 	//}
 	id := attributes[0].Value
 	label := attributes[1].Value
@@ -184,10 +184,10 @@ func (c *Context) makeKeyPair(session *pkcs11Session, privHandle *pkcs11.ObjectH
 			if pub, err = exportDSAPublicKey(session, *pubHandle); err != nil {
 				return nil, nil, err
 			}
-			result.pkcs11PrivateKey.pubKeyHandle = *pubHandle
+			result.pubKeyHandle = *pubHandle
 		}
 
-		result.pkcs11PrivateKey.pubKey = pub
+		result.pubKey = pub
 		return result, certificate, nil
 
 	case pkcs11.CKK_RSA:
@@ -196,10 +196,10 @@ func (c *Context) makeKeyPair(session *pkcs11Session, privHandle *pkcs11.ObjectH
 			if pub, err = exportRSAPublicKey(session, *pubHandle); err != nil {
 				return nil, nil, err
 			}
-			result.pkcs11PrivateKey.pubKeyHandle = *pubHandle
+			result.pubKeyHandle = *pubHandle
 		}
 
-		result.pkcs11PrivateKey.pubKey = pub
+		result.pubKey = pub
 		return result, certificate, nil
 
 	case pkcs11.CKK_ECDSA:
@@ -208,10 +208,10 @@ func (c *Context) makeKeyPair(session *pkcs11Session, privHandle *pkcs11.ObjectH
 			if pub, err = exportECDSAPublicKey(session, *pubHandle); err != nil {
 				return nil, nil, err
 			}
-			result.pkcs11PrivateKey.pubKeyHandle = *pubHandle
+			result.pubKeyHandle = *pubHandle
 		}
 
-		result.pkcs11PrivateKey.pubKey = pub
+		result.pubKey = pub
 		return result, certificate, nil
 
 	default:
@@ -333,7 +333,7 @@ func (c *Context) FindKeyPairsWithAttributes(attributes AttributeSet) (signer []
 		for _, privHandle := range privHandles {
 			k, _, err := c.makeKeyPair(session, &privHandle)
 
-			if errors.Is(err, errNoCkaId) || errors.Is(err, errNoPublicHalf) {
+			if errors.Is(err, errNoCkaID) || errors.Is(err, errNoPublicHalf) {
 				continue
 			}
 			if err != nil {
@@ -657,7 +657,7 @@ func (c *Context) getAttributes(handle pkcs11.ObjectHandle, attributes []Attribu
 	values := NewAttributeSet()
 
 	err = c.withSession(func(session *pkcs11Session) error {
-		var attrs []*pkcs11.Attribute
+		attrs := make([]*pkcs11.Attribute, 0, len(attributes))
 		for _, a := range attributes {
 			attrs = append(attrs, pkcs11.NewAttribute(a, nil))
 		}

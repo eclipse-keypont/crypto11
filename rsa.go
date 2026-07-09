@@ -64,7 +64,7 @@ func exportRSAPublicKey(session *pkcs11Session, pubHandle pkcs11.ObjectHandle) (
 	return &result, nil
 }
 
-func (k *pkcs11PrivateKeyRSA) KeyType() uint {
+func (priv *pkcs11PrivateKeyRSA) KeyType() uint {
 	return pkcs11.CKK_RSA
 }
 
@@ -307,10 +307,10 @@ func (c *Context) makeRSAKeyPair(session *pkcs11Session, privHandle *pkcs11.Obje
 			if pub, err = exportRSAPublicKey(session, *pubHandle); err != nil {
 				return nil, nil, err
 			}
-			result.pkcs11PrivateKey.pubKeyHandle = *pubHandle
+			result.pubKeyHandle = *pubHandle
 		}
 
-		result.pkcs11PrivateKey.pubKey = pub
+		result.pubKey = pub
 		return result, certificate, nil
 
 	default:
@@ -409,7 +409,7 @@ func (c *Context) FindKeyRSAPairsWithAttributes(attributes AttributeSet) (signer
 		for _, privHandle := range privHandles {
 			k, _, err := c.makeRSAKeyPair(session, &privHandle)
 
-			if errors.Is(err, errNoCkaId) || errors.Is(err, errNoPublicHalf) {
+			if errors.Is(err, errNoCkaID) || errors.Is(err, errNoPublicHalf) {
 				continue
 			}
 			if err != nil {
@@ -436,7 +436,7 @@ func (c *Context) FindKeyRSAPairsWithAttributes(attributes AttributeSet) (signer
 // Note that the SessionKeyLen option (for PKCS#1v1.5 decryption) is not supported.
 //
 // The underlying PKCS#11 implementation may impose further restrictions.
-func (priv *pkcs11PrivateKeyRSA) Decrypt(rand io.Reader, ciphertext []byte, options crypto.DecrypterOpts) (plaintext []byte, err error) {
+func (priv *pkcs11PrivateKeyRSA) Decrypt(_ io.Reader, ciphertext []byte, options crypto.DecrypterOpts) (plaintext []byte, err error) {
 	err = priv.context.withSession(func(session *pkcs11Session) error {
 		if options == nil {
 			plaintext, err = decryptPKCS1v15(session, priv, ciphertext, 0)
@@ -563,7 +563,7 @@ func signPKCS1v15(session *pkcs11Session, key *pkcs11PrivateKeyRSA, digest []byt
 // crypto.rsa.PSSSaltLengthEqualsHash (recommended) or pass an
 // explicit salt length. Moreover the underlying PKCS#11
 // implementation may impose further restrictions.
-func (priv *pkcs11PrivateKeyRSA) Sign(rand io.Reader, digest []byte, opts crypto.SignerOpts) (signature []byte, err error) {
+func (priv *pkcs11PrivateKeyRSA) Sign(_ io.Reader, digest []byte, opts crypto.SignerOpts) (signature []byte, err error) {
 	err = priv.context.withSession(func(session *pkcs11Session) error {
 		switch opts := opts.(type) {
 		case *rsa.PSSOptions:

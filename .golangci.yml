@@ -35,6 +35,28 @@ linters:
           - gosec
           - unparam
 
+      # These consts/vars mirror the PKCS#11 CK_ naming convention (CKA_*, CKM_*,
+      # CKK_*) used throughout the pkcs11 package this library wraps, and several
+      # are part of the exported API. Renaming them to idiomatic Go casing would
+      # be a breaking change for consumers and would diverge from upstream PKCS#11
+      # naming that callers cross-reference against the spec.
+      - path: attributes\.go
+        linters: [revive]
+        text: "var-naming: (const CkaObjectId should be CkaObjectID|const CkaUrl should be CkaURL|const CkaId should be CkaID)"
+      - path: hmac\.go
+        linters: [revive]
+        text: "var-naming: don't use ALL_CAPS in Go names"
+
+      # DSA is legacy but still required for HSM interop with tokens that only
+      # support it; elliptic.Unmarshal is used for EC point parsing predating
+      # crypto/ecdh. Both are deliberate, not oversights.
+      - path: (dsa|dsa_test|close_test)\.go
+        linters: [staticcheck]
+        text: "SA1019.*crypto/dsa"
+      - path: ecdsa\.go
+        linters: [staticcheck]
+        text: "SA1019.*elliptic\\.Unmarshal"
+
 formatters:
   enable:
     - gofmt

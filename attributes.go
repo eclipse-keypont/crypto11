@@ -226,7 +226,7 @@ func (a AttributeSet) AddIfNotPresent(additional []*Attribute) {
 
 // ToSlice returns a deep copy of Attributes contained in the AttributeSet.
 func (a AttributeSet) ToSlice() []*Attribute {
-	var attributes []*Attribute
+	attributes := make([]*Attribute, 0, len(a))
 	for _, v := range a {
 		duplicateAttr := CopyAttribute(v)
 		attributes = append(attributes, duplicateAttr)

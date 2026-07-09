@@ -114,9 +114,8 @@ func (g genericAead) Seal(dst, nonce, plaintext, additionalData []byte) []byte {
 		return
 	}); err != nil {
 		panic(err)
-	} else {
-		dst = append(dst, result...)
 	}
+	dst = append(dst, result...)
 	return dst
 }
 

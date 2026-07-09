@@ -54,7 +54,7 @@ func notNilBytes(obj []byte, name string) error {
 	return nil
 }
 
-func (k *pkcs11PrivateKeyDSA) KeyType() uint {
+func (signer *pkcs11PrivateKeyDSA) KeyType() uint {
 	return pkcs11.CKK_DSA
 }
 
@@ -156,7 +156,7 @@ func (c *Context) GenerateDSAKeyPairWithAttributes(public, private AttributeSet,
 // PKCS#11 expects to pick its own random data for signatures, so the rand argument is ignored.
 //
 // The return value is a DER-encoded byteblock.
-func (signer *pkcs11PrivateKeyDSA) Sign(rand io.Reader, digest []byte, opts crypto.SignerOpts) (signature []byte, err error) {
+func (signer *pkcs11PrivateKeyDSA) Sign(_ io.Reader, digest []byte, _ crypto.SignerOpts) (signature []byte, err error) {
 	return signer.context.dsaGeneric(signer.handle, pkcs11.CKM_DSA, digest)
 }
 

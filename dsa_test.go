@@ -51,7 +51,7 @@ func dsaParameters(p, q, g string) *dsa.Parameters {
 
 type DSAPrivateKey dsa.PrivateKey
 
-func (signer *DSAPrivateKey) Sign(rand io.Reader, digest []byte, opts crypto.SignerOpts) ([]byte, error) {
+func (signer *DSAPrivateKey) Sign(rand io.Reader, digest []byte, _ crypto.SignerOpts) ([]byte, error) {
 	key := (*dsa.PrivateKey)(signer)
 	var sig dsaSignature
 	var err error

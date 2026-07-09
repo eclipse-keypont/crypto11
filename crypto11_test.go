@@ -11,7 +11,6 @@ import (
 	"math/rand"
 	"os"
 	"testing"
-	"time"
 
 	pkcs11 "github.com/eclipse-keypont/pkcs11-go/cryptoki"
 
@@ -179,7 +178,6 @@ func TestSelectByNonExistingSlot(t *testing.T) {
 	config, err := loadConfigFromFile("crypto11.config.json")
 	require.NoError(t, err)
 
-	rand.Seed(time.Now().UnixNano())
 	randomSlot := int(rand.Uint32())
 
 	config.TokenLabel = ""
@@ -298,8 +296,4 @@ func TestInvalidMaxSessions(t *testing.T) {
 	cfg.MaxSessions = 1
 	_, err = Configure(cfg)
 	require.Error(t, err)
-}
-
-func init() {
-	rand.Seed(time.Now().UnixNano())
 }
