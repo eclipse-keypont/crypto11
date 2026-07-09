@@ -80,7 +80,13 @@ func (c *Context) getSession() (*pkcs11Session, error) {
 
 // resourcePoolFactoryFunc is called by the resource pool when a new session is needed.
 func (c *Context) resourcePoolFactoryFunc() (pool.Resource, error) {
-	session, err := c.ctx.OpenSession(c.slot, pkcs11.CKF_SERIAL_SESSION|pkcs11.CKF_RW_SESSION)
+	flags := uint(pkcs11.CKF_SERIAL_SESSION)
+
+	if !c.cfg.SerialSessionOnly {
+		flags = flags | pkcs11.CKF_RW_SESSION
+	}
+
+	session, err := c.ctx.OpenSession(c.slot, flags)
 	if err != nil {
 		return nil, err
 	}

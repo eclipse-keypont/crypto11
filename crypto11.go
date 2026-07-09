@@ -291,6 +291,8 @@ type Config struct {
 	GCMIVLength int
 
 	GCMIVFromHSMControl GCMIVFromHSMConfig
+
+	SerialSessionOnly bool
 }
 
 type GCMIVFromHSMConfig struct {
@@ -455,7 +457,12 @@ func Configure(config *Config) (*Context, error) {
 
 	// Create a long-term session and log it in (if supported). This session won't be used by callers, instead it is
 	// used to keep a connection alive to the token to ensure object handles and the log in status remain accessible.
-	instance.persistentSession, err = instance.ctx.OpenSession(instance.slot, pkcs11.CKF_SERIAL_SESSION|pkcs11.CKF_RW_SESSION)
+	flags := uint(pkcs11.CKF_SERIAL_SESSION)
+	if !config.SerialSessionOnly {
+		flags = flags | pkcs11.CKF_RW_SESSION
+	}
+
+	instance.persistentSession, err = instance.ctx.OpenSession(instance.slot, flags)
 	if err != nil {
 		instance.ctx.Close()
 		return nil, errors.WithMessagef(err, "failed to create long term session")
