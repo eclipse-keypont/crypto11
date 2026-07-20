@@ -16,9 +16,6 @@ on:
 permissions:
   contents: read
 
-env:
-  GOFLAGS: -mod=vendor
-
 jobs:
   analyze:
     name: Analyze (Go)

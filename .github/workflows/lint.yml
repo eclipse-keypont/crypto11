@@ -14,9 +14,6 @@ on:
 permissions:
   contents: read
 
-env:
-  GOFLAGS: -mod=vendor
-
 jobs:
   golangci:
     name: golangci-lint

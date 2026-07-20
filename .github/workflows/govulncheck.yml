@@ -19,9 +19,6 @@ on:
 permissions:
   contents: read
 
-env:
-  GOFLAGS: -mod=vendor
-
 jobs:
   govulncheck:
     name: govulncheck

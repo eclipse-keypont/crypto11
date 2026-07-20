@@ -1,8 +1,9 @@
 name: CI
 
-# Build, vet and run the test suite against SoftHSM2. Dependencies resolve from
-# the committed vendor/ tree, so the pkcs11-go replace target needs no sibling
-# checkout. Replaces the legacy .travis.yml pipeline.
+# Build, vet and run the test suite against SoftHSM2. Dependencies (including
+# github.com/eclipse-keypont/pkcs11-go) resolve from the published module
+# proxy — there is no local `replace` directive. Replaces the legacy
+# .travis.yml pipeline.
 #
 # SoftHSM2 (from apt) is used as the PKCS#11 module. Tests that require
 # PKCS#11 v3.2 features (ML-KEM) self-skip via skipIfMechUnsupported when the
@@ -21,11 +22,6 @@ on:
 
 permissions:
   contents: read
-
-env:
-  # Local `replace` directive (=> ../pkcs11-go) points at a sibling checkout
-  # that does not exist on the runner; resolve deps from the vendor/ tree.
-  GOFLAGS: -mod=vendor
 
 jobs:
   build-test:
