@@ -1,7 +1,7 @@
 Crypto11
 ========
 
-[![GoDoc](https://godoc.org/github.com/ThalesIgnite/crypto11?status.svg)](https://godoc.org/github.com/ThalesIgnite/crypto11)
+[![GoDoc](https://godoc.org/github.com/eclipse-keypont/crypto11?status.svg)](https://godoc.org/github.com/eclipse-keypont/crypto11)
 [![Build Status](https://travis-ci.com/ThalesIgnite/crypto11.svg?branch=master)](https://travis-ci.com/ThalesIgnite/crypto11)
 
 This is an implementation of the standard Golang crypto interfaces that
@@ -27,7 +27,7 @@ decryption through
 
 To verify signatures or encrypt messages, retrieve the public key and do it in software.
 
-See [the documentation](https://godoc.org/github.com/ThalesIgnite/crypto11) for details of various limitations,
+See [the documentation](https://godoc.org/github.com/eclipse-keypont/crypto11) for details of various limitations,
 especially regarding symmetric crypto.
 
 
@@ -45,15 +45,15 @@ Since v1.0.0, crypto11 requires Go v1.11+. Install the library by running:
 > - `toolchain go X.Y.Z` — the **recommended** toolchain used by maintainers (tracks the latest patch release).
 >
 > This lets projects on older Go versions still import crypto11, while maintainers can develop and test with the latest toolchain.
-> See [#137](https://github.com/thales-transfer/crypto11/issues/137) for context.
+> See [#137](https://github.com/eclipse-keypont/crypto11/issues/137) for context.
 
 ```bash
-go get github.com/ThalesGroup/crypto11
+go get github.com/eclipse-keypont/crypto11
 ```
 
 The crypto11 library needs to be configured with information about your PKCS#11 installation. This is either done
 programmatically
-(see the `Config` struct in [the documentation](https://godoc.org/github.com/ThalesIgnite/crypto11)) or via a
+(see the `Config` struct in [the documentation](https://godoc.org/github.com/eclipse-keypont/crypto11)) or via a
 configuration
 file. The configuration file is a JSON representation of the `Config` struct.
 
@@ -153,7 +153,7 @@ Testing with SoftHSM2
 To set up a slot:
 
     $ cat softhsm2.conf
-    directories.tokendir = /home/rjk/go/src/github.com/ThalesIgnite/crypto11/tokens
+    directories.tokendir = /home/rjk/go/src/github.com/eclipse-keypont/crypto11/tokens
     objectstore.backend = file
     log.level = INFO
     $ mkdir tokens
@@ -250,13 +250,13 @@ Limitations
   is not implemented and an error is returned if it is nonzero.
   The reason for this is that it is not possible for crypto11 to guarantee the constant-time behavior in the
   specification.
-  See [issue #5](https://github.com/ThalesIgnite/crypto11/issues/5) for further discussion.
+  See [issue #5](https://github.com/eclipse-keypont/crypto11/issues/5) for further discussion.
 * Symmetric crypto support via [cipher.Block](https://golang.org/pkg/crypto/cipher/#Block) is very slow.
   You can use the `BlockModeCloser` API
   (over 400 times as fast on my computer)
   but you must call the Close()
   interface (not found in [cipher.BlockMode](https://golang.org/pkg/crypto/cipher/#BlockMode)).
-  See [issue #6](https://github.com/ThalesIgnite/crypto11/issues/6) for further discussion.
+  See [issue #6](https://github.com/eclipse-keypont/crypto11/issues/6) for further discussion.
 * Unit tests may interfere between them. You should fine tune and select the Go test file you want to run, one at a
   time.
 
