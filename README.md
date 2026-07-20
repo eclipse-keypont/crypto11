@@ -79,7 +79,7 @@ crypto11 requires Go 1.25 or later (see the `go` directive in `go.mod`). Install
 > - `toolchain go X.Y.Z` — the **recommended** toolchain used by maintainers (tracks the latest patch release).
 >
 > This lets projects on older Go versions still import crypto11, while maintainers can develop and test with the latest toolchain.
-> See [#137](https://github.com/thales-transfer/crypto11/issues/137) for context.
+> See [#137](https://github.com/eclipse-keypont/crypto11/issues/137) for context.
 
 ```sh
 go get github.com/eclipse-keypont/crypto11
