@@ -13,43 +13,48 @@ This is an implementation of the standard Golang crypto interfaces that
 uses [PKCS#11](http://docs.oasis-open.org/pkcs11/pkcs11-base/v2.40/errata01/os/pkcs11-base-v2.40-errata01-os-complete.html)
 as a backend.
 
+Low-level PKCS#11 (Cryptoki) bindings, including the PKCS#11 v3.2 mechanisms needed for
+post-quantum algorithms such as ML-KEM, are provided by
+[github.com/eclipse-keypont/pkcs11-go](https://pkg.go.dev/github.com/eclipse-keypont/pkcs11-go).
+crypto11 builds the familiar `crypto.Signer` / `crypto.Decrypter` Go interfaces on top of it.
+
 ## Supported algorithms
 
 ### Asymmetric keys
 
-| Algorithm | Key generation | Signing | Decryption | Notes |
-|-----------|:-:|:-:|:-:|-------|
-| RSA | ✓ | PKCS#1 v1.5, PSS | PKCS#1 v1.5, OAEP | Via `crypto.Signer` / `crypto.Decrypter` |
-| ECDSA | ✓ | ✓ | — | Via `crypto.Signer` |
-| DSA | ✓ | ✓ | — | Via `crypto.Signer` |
+| Algorithm | Key generation |     Signing      |    Decryption     | Notes                                    |
+|-----------|:--------------:|:----------------:|:-----------------:|------------------------------------------|
+| RSA       |       ✓        | PKCS#1 v1.5, PSS | PKCS#1 v1.5, OAEP | Via `crypto.Signer` / `crypto.Decrypter` |
+| ECDSA     |       ✓        |        ✓         |         —         | Via `crypto.Signer`                      |
+| DSA       |       ✓        |        ✓         |         —         | Via `crypto.Signer`                      |
 
 To verify signatures or encrypt messages, retrieve the public key and do it in software.
 
 ### Post-quantum keys (PKCS#11 v3.2)
 
-| Algorithm | Key generation | Encapsulation | Decapsulation | Notes |
-|-----------|:-:|:-:|:-:|-------|
-| ML-KEM 512 | ✓ | ✓ | ✓ | FIPS 203 / PKCS#11 v3.2 (`CKM_ML_KEM`) |
-| ML-KEM 768 | ✓ | ✓ | ✓ | FIPS 203 / PKCS#11 v3.2 (`CKM_ML_KEM`) |
-| ML-KEM 1024 | ✓ | ✓ | ✓ | FIPS 203 / PKCS#11 v3.2 (`CKM_ML_KEM`) |
+| Algorithm   | Key generation | Encapsulation | Decapsulation | Notes                                  |
+|-------------|:--------------:|:-------------:|:-------------:|----------------------------------------|
+| ML-KEM 512  |       ✓        |       ✓       |       ✓       | FIPS 203 / PKCS#11 v3.2 (`CKM_ML_KEM`) |
+| ML-KEM 768  |       ✓        |       ✓       |       ✓       | FIPS 203 / PKCS#11 v3.2 (`CKM_ML_KEM`) |
+| ML-KEM 1024 |       ✓        |       ✓       |       ✓       | FIPS 203 / PKCS#11 v3.2 (`CKM_ML_KEM`) |
 
 ML-KEM uses the `MLKEMEncapsulator` / `MLKEMDecapsulator` interfaces (not `crypto.Signer`).
 Requires a PKCS#11 v3.2-capable token such as [SoftHSMv3](https://github.com/pqctoday-org/pqctoday-hsm).
 
 ### Symmetric keys
 
-| Algorithm | Key sizes | Modes | Notes |
-|-----------|-----------|-------|-------|
-| AES | 128, 192, 256 bit | CBC, GCM | `cipher.Block`, `cipher.BlockMode`, `BlockModeCloser`, AEAD |
-| DES3 | 192 bit | CBC | Token support varies |
+| Algorithm | Key sizes         | Modes    | Notes                                                       |
+|-----------|-------------------|----------|-------------------------------------------------------------|
+| AES       | 128, 192, 256 bit | CBC, GCM | `cipher.Block`, `cipher.BlockMode`, `BlockModeCloser`, AEAD |
+| DES3      | 192 bit           | CBC      | Token support varies                                        |
 
 ### Other
 
-| Feature | Notes |
-|---------|-------|
-| X.509 certificates | Import and retrieval |
-| HMAC | Token support varies (not available on SoftHSM) |
-| Random number generation | Via `io.Reader` |
+| Feature                  | Notes                                           |
+|--------------------------|-------------------------------------------------|
+| X.509 certificates       | Import and retrieval                            |
+| HMAC                     | Token support varies (not available on SoftHSM) |
+| Random number generation | Via `io.Reader`                                 |
 
 Signing is done through the
 [crypto.Signer](https://golang.org/pkg/crypto/#Signer) interface and
@@ -63,7 +68,7 @@ especially regarding symmetric crypto.
 Installation
 ============
 
-Since v1.0.0, crypto11 requires Go v1.11+. Install the library by running:
+crypto11 requires Go 1.25 or later (see the `go` directive in `go.mod`). Install the library by running:
 
 > **Note on Go version policy**
 >
@@ -76,7 +81,7 @@ Since v1.0.0, crypto11 requires Go v1.11+. Install the library by running:
 > This lets projects on older Go versions still import crypto11, while maintainers can develop and test with the latest toolchain.
 > See [#137](https://github.com/thales-transfer/crypto11/issues/137) for context.
 
-```bash
+```sh
 go get github.com/eclipse-keypont/crypto11
 ```
 
@@ -112,6 +117,18 @@ go env -w CGO_ENABLED=1
 go build
 ```
 
+A `Makefile` wraps the common developer commands:
+
+| Target                       | Description                                                                               |
+|------------------------------|-------------------------------------------------------------------------------------------|
+| `make build`                 | `go build ./...`                                                                          |
+| `make test`                  | `go test ./...` (see [Testing Guidance](#testing-guidance) below for HSM-backed coverage) |
+| `make lint`                  | Runs `golangci-lint` (v2) against `.golangci.yml`, same checks as CI                      |
+| `make lint-fix`              | Runs `golangci-lint` with `--fix` for mechanically-fixable findings                       |
+| `make notices`               | Regenerates [`NOTICES.md`](./NOTICES.md) via `go-licenses`                                |
+| `make version`               | Prints the most recent git tag                                                            |
+| `make release VERSION=x.y.z` | Creates a signed `vx.y.z` tag and pushes it, triggering the release workflow              |
+
 Testing Guidance
 ================
 
@@ -130,14 +147,14 @@ Unit test on one file
 ---------
 
 ```sh
-export DEPENDENCIES="rand.go attributes.go hmac.go crypto11.go common.go keys.go rsa.go certificates.go ecdsa.go blockmode.go sessions.go aead.go dsa.go symmetric.go common_test.go"
-go test block_test.go $DEPENDENCIES
+export DEPENDENCIES="rand.go attributes.go hmac.go crypto11.go common.go keys.go rsa.go certificates.go ecdsa.go blockmode.go sessions.go aead.go dsa.go symmetric.go mlkem.go common_test.go"
+go test blockmode_test.go $DEPENDENCIES
 ```
 
 Remote debug :
 
 ```sh
-dlv test --headless --listen=:2345 --api-version=2 --accept-multiclient block_test.go $DEPENDENCIES
+dlv test --headless --listen=:2345 --api-version=2 --accept-multiclient blockmode_test.go $DEPENDENCIES
 ```
 
 Testing with AWS CloudHSM
@@ -156,7 +173,7 @@ A minimal configuration file for CloudHSM will look like this:
 
 To run the test suite you must skip unsupported tests:
 
-```
+```sh
 CRYPTO11_SKIP=CERTS,OAEP_LABEL,DSA go test -v
 ```
 
@@ -171,7 +188,7 @@ noticed when testing with the v2.0.4 PKCS#11 library:
   https://docs.aws.amazon.com/cloudhsm/latest/userguide/pkcs11-mechanisms.html.
 - It appears that `CKA_ID` values must be unique, otherwise you get a `CKR_ATTRIBUTE_VALUE_INVALID` error.
 - Very rapid session opening can trigger the following error:
-  ```
+  ```text
   C_OpenSession failed with error CKR_ARGUMENTS_BAD : 0x00000007
   HSM error 8c: HSM Error: Already maximum number of sessions are issued
   ```
@@ -207,29 +224,32 @@ support ML-KEM or other PKCS#11 v3.2 mechanisms (those tests will be skipped aut
 
 To set up a slot:
 
-    $ cat softhsm2.conf
-    directories.tokendir = /home/rjk/go/src/github.com/eclipse-keypont/crypto11/tokens
-    objectstore.backend = file
-    log.level = INFO
-    $ mkdir tokens
-    $ export SOFTHSM2_CONF=`pwd`/softhsm2.conf
-    $ softhsm2-util --init-token --slot 0 --label test
-    === SO PIN (4-255 characters) ===
-    Please enter SO PIN: ********
-    Please reenter SO PIN: ********
-    === User PIN (4-255 characters) ===
-    Please enter user PIN: ********
-    Please reenter user PIN: ********
-    The token has been initialized.
+```sh
+$ cat softhsm2.conf
+directories.tokendir = /home/rjk/go/src/github.com/eclipse-keypont/crypto11/tokens
+objectstore.backend = file
+log.level = INFO
+$ mkdir tokens
+$ export SOFTHSM2_CONF=`pwd`/softhsm2.conf
+$ softhsm2-util --init-token --slot 0 --label test
+=== SO PIN (4-255 characters) ===
+Please enter SO PIN: ********
+Please reenter SO PIN: ********
+=== User PIN (4-255 characters) ===
+Please enter user PIN: ********
+Please reenter user PIN: ********
+The token has been initialized.
+```
 
 The configuration looks like this:
 
-    $ cat crypto11.config.json
-    {
-      "Path" : "/usr/lib/softhsm/libsofthsm2.so",
-      "TokenLabel": "test",
-      "Pin" : "password"
-    }
+```json
+{
+  "Path" : "/usr/lib/softhsm/libsofthsm2.so",
+  "TokenLabel": "test",
+  "Pin" : "password"
+}
+```
 
 OAEP is only partial and HMAC is unsupported on SoftHSMv2, so expect test skips.
 
@@ -238,37 +258,42 @@ Testing with nCipher nShield
 
 In all cases, it's worth enabling nShield PKCS#11 log output:
 
-    export CKNFAST_DEBUG=2
+```sh
+export CKNFAST_DEBUG=2
+```
 
 To protect keys with a 1/N operator cardset:
 
-    $ cat crypto11.config.json
-    {
-      "Path" : "/opt/nfast/toolkits/pkcs11/libcknfast.so",
-      "TokenLabel": "rjk",
-      "Pin" : "password"
-    }
+```json
+{
+  "Path" : "/opt/nfast/toolkits/pkcs11/libcknfast.so",
+  "TokenLabel": "rjk",
+  "Pin" : "password"
+}
+```
 
 You can also identify the token by serial number, which in this case
 means the first 16 hex digits of the operator cardset's token hash:
 
-    $ cat crypto11.config.json
-    {
-      "Path" : "/opt/nfast/toolkits/pkcs11/libcknfast.so",
-      "TokenSerial": "1d42780caa22efd5",
-      "Pin" : "password"
-    }
+```json
+{
+  "Path" : "/opt/nfast/toolkits/pkcs11/libcknfast.so",
+  "TokenSerial": "1d42780caa22efd5",
+  "Pin" : "password"
+}
+```
 
 A card from the cardset must be in the slot when you run `go test`.
 
 To protect keys with the module only, use the 'accelerator' token:
 
-    $ cat crypto11.config.json
-    {
-      "Path" : "/opt/nfast/toolkits/pkcs11/libcknfast.so",
-      "TokenLabel": "accelerator",
-      "Pin" : "password"
-    }
+```json
+{
+  "Path" : "/opt/nfast/toolkits/pkcs11/libcknfast.so",
+  "TokenLabel": "accelerator",
+  "Pin" : "password"
+}
+```
 
 (At time of writing) GCM is not implemented, so expect test skips.
 
@@ -332,7 +357,8 @@ Here are some topics we'd like to cover:
 ## Vulnerability check
 
 ```sh
-$ govulncheck ./...                                                                                                                       ─╯
+$ govulncheck ./...
+
 Scanning your code and 112 packages across 5 dependent modules for known vulnerabilities...
 
 No vulnerabilities found.
