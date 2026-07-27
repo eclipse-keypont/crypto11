@@ -1,5 +1,4 @@
-Crypto11
-========
+# Crypto11
 
 [![Go Reference](https://pkg.go.dev/badge/github.com/eclipse-keypont/crypto11.svg)](https://pkg.go.dev/github.com/eclipse-keypont/crypto11)
 [![Build](https://github.com/eclipse-keypont/crypto11/actions/workflows/ci.yml/badge.svg)](https://github.com/eclipse-keypont/crypto11/actions/workflows/ci.yml)
@@ -18,9 +17,9 @@ post-quantum algorithms such as ML-KEM, are provided by
 [github.com/eclipse-keypont/pkcs11-go](https://pkg.go.dev/github.com/eclipse-keypont/pkcs11-go).
 crypto11 builds the familiar `crypto.Signer` / `crypto.Decrypter` Go interfaces on top of it.
 
-## Supported algorithms
+# Supported Algorithms
 
-### Asymmetric keys
+## Asymmetric keys
 
 | Algorithm | Key generation |     Signing      |    Decryption     | Notes                                    |
 |-----------|:--------------:|:----------------:|:-----------------:|------------------------------------------|
@@ -30,7 +29,7 @@ crypto11 builds the familiar `crypto.Signer` / `crypto.Decrypter` Go interfaces 
 
 To verify signatures or encrypt messages, retrieve the public key and do it in software.
 
-### Post-quantum keys (PKCS#11 v3.2)
+## Post-quantum keys (PKCS#11 v3.2)
 
 | Algorithm   | Key generation | Encapsulation | Decapsulation | Notes                                  |
 |-------------|:--------------:|:-------------:|:-------------:|----------------------------------------|
@@ -41,14 +40,14 @@ To verify signatures or encrypt messages, retrieve the public key and do it in s
 ML-KEM uses the `MLKEMEncapsulator` / `MLKEMDecapsulator` interfaces (not `crypto.Signer`).
 Requires a PKCS#11 v3.2-capable token such as [SoftHSMv3](https://github.com/pqctoday-org/pqctoday-hsm).
 
-### Symmetric keys
+## Symmetric keys
 
 | Algorithm | Key sizes         | Modes    | Notes                                                       |
 |-----------|-------------------|----------|-------------------------------------------------------------|
 | AES       | 128, 192, 256 bit | CBC, GCM | `cipher.Block`, `cipher.BlockMode`, `BlockModeCloser`, AEAD |
 | DES3      | 192 bit           | CBC      | Token support varies                                        |
 
-### Other
+## Other
 
 | Feature                  | Notes                                           |
 |--------------------------|-------------------------------------------------|
@@ -65,8 +64,7 @@ See [the documentation](https://godoc.org/github.com/eclipse-keypont/crypto11) f
 especially regarding symmetric crypto.
 
 
-Installation
-============
+# Installation
 
 crypto11 requires Go 1.25 or later (see the `go` directive in `go.mod`). Install the library by running:
 
@@ -106,8 +104,7 @@ A minimal configuration file looks like this:
 - `Pin` is the password for the `CKU_USER` user.
 - `UseGCMIVFromHSM` generates the IV for GCM mechanism from the HSM
 
-Build
-=====
+# Build
 
 This package is using CGo for cryptographic packages.  
 Enable CGo before building Crypto11 :
@@ -129,11 +126,9 @@ A `Makefile` wraps the common developer commands:
 | `make version`               | Prints the most recent git tag                                                            |
 | `make release VERSION=x.y.z` | Creates a signed `vx.y.z` tag and pushes it, triggering the release workflow              |
 
-Testing Guidance
-================
+# Testing Guidance
 
-Disabling tests
----------------
+## Disabling tests
 
 To disable specific tests, set the environment variable `CRYPTO11_SKIP=<flags>` where `<flags>` is a comma-separated
 list of the following options:
@@ -143,8 +138,28 @@ list of the following options:
   in some crypto libraries). Needed for AWS CloudHSM.
 * `DSA` - disables DSA tests. Needed for AWS CloudHSM (and any other tokens not supporting DSA).
 
-Unit test on one file
----------
+## Testing with SoftHSMv3 (recommended)
+
+[SoftHSMv3](https://github.com/pqctoday-org/pqctoday-hsm) supports PKCS#11 v3.2 and is required for
+ML-KEM and other post-quantum tests. Token provisioning is fully automated:
+
+```sh
+PKCS11_MODULE=/path/to/libsofthsmv3.so go test ./...
+```
+
+Override the user PIN (default `1234`):
+
+```sh
+PKCS11_MODULE=/path/to/libsofthsmv3.so PKCS11_PIN=mypin go test ./...
+```
+
+`TestMain` in `setup_test.go` creates three ephemeral tokens (`crypto11-test`, `token1`, `token2`)
+via the PKCS#11 API, writes a temporary `config` file, runs all tests, then cleans up. No
+external tools or manual token setup are required.
+
+DSA, DES3, PSS, and HMAC are not supported by SoftHSMv3 and those tests are automatically skipped.
+
+## Unit test on one file
 
 ```sh
 export DEPENDENCIES="rand.go attributes.go hmac.go crypto11.go common.go keys.go rsa.go certificates.go ecdsa.go blockmode.go sessions.go aead.go dsa.go symmetric.go mlkem.go common_test.go"
@@ -157,8 +172,7 @@ Remote debug :
 dlv test --headless --listen=:2345 --api-version=2 --accept-multiclient blockmode_test.go $DEPENDENCIES
 ```
 
-Testing with AWS CloudHSM
--------------------------
+## Testing with AWS CloudHSM
 
 A minimal configuration file for CloudHSM will look like this:
 
@@ -193,30 +207,7 @@ noticed when testing with the v2.0.4 PKCS#11 library:
   HSM error 8c: HSM Error: Already maximum number of sessions are issued
   ```
 
-Testing with SoftHSMv3 (recommended)
--------------------------------------
-
-[SoftHSMv3](https://github.com/pqctoday-org/pqctoday-hsm) supports PKCS#11 v3.2 and is required for
-ML-KEM and other post-quantum tests. Token provisioning is fully automated:
-
-```sh
-PKCS11_MODULE=/path/to/libsofthsmv3.so go test ./...
-```
-
-Override the user PIN (default `1234`):
-
-```sh
-PKCS11_MODULE=/path/to/libsofthsmv3.so PKCS11_PIN=mypin go test ./...
-```
-
-`TestMain` in `setup_test.go` creates three ephemeral tokens (`crypto11-test`, `token1`, `token2`)
-via the PKCS#11 API, writes a temporary `config` file, runs all tests, then cleans up. No
-external tools or manual token setup are required.
-
-DSA, DES3, PSS, and HMAC are not supported by SoftHSMv3 and those tests are automatically skipped.
-
-Testing with SoftHSM2
----------------------
+## Testing with SoftHSM2
 
 [SoftHSMv2](https://github.com/softhsm/SoftHSMv2) covers all classical algorithms but does **not**
 support ML-KEM or other PKCS#11 v3.2 mechanisms (those tests will be skipped automatically via
@@ -253,8 +244,7 @@ The configuration looks like this:
 
 OAEP is only partial and HMAC is unsupported on SoftHSMv2, so expect test skips.
 
-Testing with nCipher nShield
-----------------------------
+## Testing with nCipher nShield
 
 In all cases, it's worth enabling nShield PKCS#11 log output:
 
@@ -297,8 +287,7 @@ To protect keys with the module only, use the 'accelerator' token:
 
 (At time of writing) GCM is not implemented, so expect test skips.
 
-Testing with a TPM and PKCS11
------------------------------
+## Testing with a TPM and PKCS11
 
 You must know that tpm2-pkcs11 is much more limited than other libraries like softhsm2 for cryptographic operations.  
 The absence of the `C_GenerateKey` function in the tpm2-pkcs11 library is one example of the limitations.  
@@ -323,8 +312,7 @@ Configure :
 Fine tune the unit tests to use the keys you created in the previous step.  
 Beware that a lot of unit tests may fail otherwise. You must fine-tune your usecase for a TPM usage.
 
-Limitations
-===========
+# Limitations
 
 * The [PKCS1v15DecryptOptions SessionKeyLen](https://golang.org/pkg/crypto/rsa/#PKCS1v15DecryptOptions) field
   is not implemented and an error is returned if it is nonzero.
@@ -340,8 +328,61 @@ Limitations
 * Unit tests may interfere between them. You should fine tune and select the Go test file you want to run, one at a
   time.
 
-Contributions
-========
+# Verifying release artifacts
+
+Each GitHub Release ships a deterministic source archive plus everything needed to verify it without trusting
+GitHub. For a release `vX.Y.Z` you'll find:
+
+| Asset | Purpose |
+|-------|---------|
+| `crypto11-vX.Y.Z.tar.gz` | The source archive, built with `git archive` from the tagged commit |
+| `crypto11-vX.Y.Z.tar.gz.sha256` | SHA-256 checksum of the archive |
+| `crypto11-vX.Y.Z.tar.gz.cosign.bundle` | Keyless [cosign](https://github.com/sigstore/cosign) signature (signed via GitHub Actions OIDC — no private key involved) |
+| `crypto11-vX.Y.Z.tar.gz.intoto.jsonl` | [SLSA3](https://slsa.dev/) build provenance, produced by [slsa-github-generator](https://github.com/slsa-framework/slsa-github-generator) |
+
+Download all four assets for the release you want to verify:
+
+```sh
+gh release download vX.Y.Z --repo eclipse-keypont/crypto11
+```
+
+**1. Verify the checksum**
+
+```sh
+sha256sum -c crypto11-vX.Y.Z.tar.gz.sha256
+```
+
+**2. Verify the cosign signature** (requires [cosign](https://docs.sigstore.dev/cosign/system_config/installation/))
+
+```sh
+cosign verify-blob \
+  --bundle crypto11-vX.Y.Z.tar.gz.cosign.bundle \
+  --certificate-identity-regexp '^https://github\.com/eclipse-keypont/crypto11/\.github/workflows/release\.yml@refs/tags/v.*$' \
+  --certificate-oidc-issuer 'https://token.actions.githubusercontent.com' \
+  crypto11-vX.Y.Z.tar.gz
+```
+
+**3. Verify the SLSA provenance** (requires [slsa-verifier](https://github.com/slsa-framework/slsa-verifier))
+
+```sh
+slsa-verifier verify-artifact \
+  --provenance-path crypto11-vX.Y.Z.tar.gz.intoto.jsonl \
+  --source-uri github.com/eclipse-keypont/crypto11 \
+  --source-tag vX.Y.Z \
+  crypto11-vX.Y.Z.tar.gz
+```
+
+**4. Verify the git tag itself** — release tags are GPG/SSH-signed by `make release` (`git tag -s`):
+
+```sh
+git verify-tag vX.Y.Z
+```
+
+`go get` consumers don't need any of this — they fetch source through the Go module proxy and verify it via
+`go.sum` / `sum.golang.org`. These assets exist for auditors and to satisfy OpenSSF Scorecard's Signed-Releases
+check.
+
+# Contributions
 
 Contributions are gratefully received. Before beginning work on sizeable changes, please open an issue first to
 discuss.
@@ -350,11 +391,11 @@ Here are some topics we'd like to cover:
 
 * Full test instructions for additional PKCS#11 implementations.
 
-## Third-party notices
+# Third-party notices
 
 [`NOTICES.md`](./NOTICES.md) lists all third-party dependency licenses and is auto-generated via `make notices` (requires [`go-licenses`](https://github.com/google/go-licenses)).
 
-## Vulnerability check
+# Vulnerability check
 
 ```sh
 $ govulncheck ./...
