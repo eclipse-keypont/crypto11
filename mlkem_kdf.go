@@ -67,11 +67,11 @@ func appendBE32(b []byte, v uint32) []byte {
 func kmac128(key, data []byte, outputLen int) []byte {
 	// KMAC128(K, X, L, S) = cSHAKE128(bytepad(encode_string(K), 168) || X || right_encode(L*8), L, "KMAC", S="")
 	h := sha3.NewCSHAKE128([]byte("KMAC"), nil)
-	h.Write(bytepad(encodeString(key), 168))
-	h.Write(data)
-	h.Write(rightEncode(uint64(outputLen * 8)))
+	_, _ = h.Write(bytepad(encodeString(key), 168))    // never returns an error
+	_, _ = h.Write(data)                               // never returns an error
+	_, _ = h.Write(rightEncode(uint64(outputLen * 8))) // never returns an error
 	out := make([]byte, outputLen)
-	h.Read(out) //nolint:errcheck // XOF Read never returns an error
+	_, _ = h.Read(out) // XOF Read never returns an error
 	return out
 }
 
@@ -80,11 +80,11 @@ func kmac128(key, data []byte, outputLen int) []byte {
 func kmac256(key, data []byte, outputLen int) []byte {
 	// KMAC256(K, X, L, S) = cSHAKE256(bytepad(encode_string(K), 136) || X || right_encode(L*8), L, "KMAC", S="")
 	h := sha3.NewCSHAKE256([]byte("KMAC"), nil)
-	h.Write(bytepad(encodeString(key), 136))
-	h.Write(data)
-	h.Write(rightEncode(uint64(outputLen * 8)))
+	_, _ = h.Write(bytepad(encodeString(key), 136))    // never returns an error
+	_, _ = h.Write(data)                               // never returns an error
+	_, _ = h.Write(rightEncode(uint64(outputLen * 8))) // never returns an error
 	out := make([]byte, outputLen)
-	h.Read(out) //nolint:errcheck // XOF Read never returns an error
+	_, _ = h.Read(out) // XOF Read never returns an error
 	return out
 }
 
