@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: 2026 Thales Group and the crypto11 Contributors
 # SPDX-License-Identifier: MIT
 
-.PHONY: build test lint lint-fix notices version release
+.PHONY: build test lint lint-fix govulncheck notices version release
 
 # ── Build ────────────────────────────────────────────────────────────────────
 build:
@@ -37,6 +37,22 @@ lint:
 # Auto-fix the mechanically-fixable findings (formatting, some conversions):
 lint-fix:
 	$(GOLANGCI_LINT) run --fix ./...
+
+# ── Vulnerability scan ───────────────────────────────────────────────────────
+# Runs govulncheck (reachability-aware, cross-checked against the Go vuln DB) —
+# the same check as the CI govulncheck workflow (.github/workflows/govulncheck.yml).
+#
+# Install govulncheck:
+#   go install golang.org/x/vuln/cmd/govulncheck@latest
+GOVULNCHECK ?= govulncheck
+
+govulncheck:
+	@command -v $(GOVULNCHECK) >/dev/null 2>&1 || { \
+	    echo "govulncheck not found. Install it with:"; \
+	    echo "  go install golang.org/x/vuln/cmd/govulncheck@latest"; \
+	    exit 1; \
+	}
+	$(GOVULNCHECK) -show verbose ./...
 
 ## Licenses
 notices:
