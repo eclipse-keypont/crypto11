@@ -1,4 +1,4 @@
-module github.com/eclipse-keypont/crypto11
+module github.com/eclipse-keypont/crypto11/v2
 
 go 1.25.0
 

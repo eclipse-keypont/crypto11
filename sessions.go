@@ -9,7 +9,7 @@ import (
 
 	pkcs11 "github.com/eclipse-keypont/pkcs11-go/cryptoki"
 
-	"github.com/eclipse-keypont/crypto11/internal/pool"
+	"github.com/eclipse-keypont/crypto11/v2/internal/pool"
 )
 
 // pkcs11Session wraps a PKCS#11 session handle so we can use it in a resource pool.

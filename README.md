@@ -1,6 +1,6 @@
 # Crypto11
 
-[![Go Reference](https://pkg.go.dev/badge/github.com/eclipse-keypont/crypto11.svg)](https://pkg.go.dev/github.com/eclipse-keypont/crypto11)
+[![Go Reference](https://pkg.go.dev/badge/github.com/eclipse-keypont/crypto11/v2.svg)](https://pkg.go.dev/github.com/eclipse-keypont/crypto11/v2)
 [![Build](https://github.com/eclipse-keypont/crypto11/actions/workflows/ci.yml/badge.svg)](https://github.com/eclipse-keypont/crypto11/actions/workflows/ci.yml)
 [![Lint](https://github.com/eclipse-keypont/crypto11/actions/workflows/lint.yml/badge.svg)](https://github.com/eclipse-keypont/crypto11/actions/workflows/lint.yml)
 [![Secret Scan](https://github.com/eclipse-keypont/crypto11/actions/workflows/secret-scan.yml/badge.svg)](https://github.com/eclipse-keypont/crypto11/actions/workflows/secret-scan.yml)
@@ -16,6 +16,11 @@ Low-level PKCS#11 (Cryptoki) bindings, including the PKCS#11 v3.2 mechanisms nee
 post-quantum algorithms such as ML-KEM, are provided by
 [github.com/eclipse-keypont/pkcs11-go](https://pkg.go.dev/github.com/eclipse-keypont/pkcs11-go).
 crypto11 builds the familiar `crypto.Signer` / `crypto.Decrypter` Go interfaces on top of it.
+
+**v2** is a breaking release: the PKCS#11 binding moved to
+[pkcs11-go](https://pkg.go.dev/github.com/eclipse-keypont/pkcs11-go), bringing PKCS#11 v3.2 and post-quantum
+ML-KEM key support, alongside a full lint/vet cleanup and a security-hardening pass. See
+[Releases](https://github.com/eclipse-keypont/crypto11/releases) for the full history.
 
 # Supported Algorithms
 
@@ -60,7 +65,7 @@ Signing is done through the
 decryption through
 [crypto.Decrypter](https://golang.org/pkg/crypto/#Decrypter).
 
-See [the documentation](https://godoc.org/github.com/eclipse-keypont/crypto11) for details of various limitations,
+See [the documentation](https://godoc.org/github.com/eclipse-keypont/crypto11/v2) for details of various limitations,
 especially regarding symmetric crypto.
 
 
@@ -80,12 +85,12 @@ crypto11 requires Go 1.25 or later (see the `go` directive in `go.mod`). Install
 > See [#137](https://github.com/eclipse-keypont/crypto11/issues/137) for context.
 
 ```sh
-go get github.com/eclipse-keypont/crypto11
+go get github.com/eclipse-keypont/crypto11/v2
 ```
 
 The crypto11 library needs to be configured with information about your PKCS#11 installation. This is either done
 programmatically
-(see the `Config` struct in [the documentation](https://godoc.org/github.com/eclipse-keypont/crypto11)) or via a
+(see the `Config` struct in [the documentation](https://godoc.org/github.com/eclipse-keypont/crypto11/v2)) or via a
 configuration
 file. The configuration file is a JSON representation of the `Config` struct.
 
