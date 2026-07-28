@@ -29,6 +29,13 @@ scanning, dependency review, and an OpenSSF Scorecard rating gate every push, an
 signed and SLSA3-attested rather than just pushed — see [Verifying release artifacts](#verifying-release-artifacts)
 below for what ships and how to check it.
 
+# Part of Eclipse Keypont
+
+crypto11 is part of [Eclipse Keypont](https://projects.eclipse.org/projects/technology.keypont), alongside
+[gose](https://github.com/eclipse-keypont/gose) and [pkcs11-go](https://github.com/eclipse-keypont/pkcs11-go).
+*Keypont* — "key" plus the French *pont* ("bridge") — reflects the project's goal: bridging Go
+applications to cryptographic keys held in HSMs and other PKCS#11-backed hardware.
+
 # Supported Algorithms
 
 ## Asymmetric keys
