@@ -7,6 +7,7 @@
 [![Release](https://github.com/eclipse-keypont/crypto11/actions/workflows/release.yml/badge.svg)](https://github.com/eclipse-keypont/crypto11/actions/workflows/release.yml)
 [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/eclipse-keypont/crypto11/badge)](https://scorecard.dev/viewer/?uri=github.com/eclipse-keypont/crypto11)
 [![GitHub release](https://img.shields.io/github/v/release/eclipse-keypont/crypto11)](https://github.com/eclipse-keypont/crypto11/releases/latest)
+[![Changelog](https://img.shields.io/badge/changelog-v1%20%E2%86%92%20v2-blue)](./CHANGELOG.md)
 
 This is an implementation of the standard Golang crypto interfaces that
 uses [PKCS#11](http://docs.oasis-open.org/pkcs11/pkcs11-base/v2.40/errata01/os/pkcs11-base-v2.40-errata01-os-complete.html)
@@ -20,7 +21,8 @@ crypto11 builds the familiar `crypto.Signer` / `crypto.Decrypter` Go interfaces 
 **v2** is a breaking release: the PKCS#11 binding moved to
 [pkcs11-go](https://pkg.go.dev/github.com/eclipse-keypont/pkcs11-go), bringing PKCS#11 v3.2 and post-quantum
 ML-KEM key support, alongside a full lint/vet cleanup and a security-hardening pass. See
-[Releases](https://github.com/eclipse-keypont/crypto11/releases) for the full history.
+[CHANGELOG.md](./CHANGELOG.md) for a summary of what changed between v1 and v2, or
+[Releases](https://github.com/eclipse-keypont/crypto11/releases) for the full commit-level history.
 
 This repository is built with a hardened GitHub Actions pipeline: golangci-lint, govulncheck, CodeQL, secret
 scanning, dependency review, and an OpenSSF Scorecard rating gate every push, and tagged releases are

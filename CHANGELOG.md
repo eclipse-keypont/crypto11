@@ -1,0 +1,84 @@
+# Changelog
+
+All notable changes to crypto11 are documented in this file. For the full commit-level history see
+[GitHub Releases](https://github.com/eclipse-keypont/crypto11/releases).
+
+## v2.0.0 — pkcs11-go, PKCS#11 v3.2 and ML-KEM
+
+v2 is a breaking release (hence the `/v2` module path) driven by three changes: the PKCS#11 binding
+was replaced, the config file was renamed, and the API surface was hardened after a security audit.
+
+### Breaking changes
+
+- **PKCS#11 binding replaced**: `miekg/pkcs11` is out, [`eclipse-keypont/pkcs11-go`](https://pkg.go.dev/github.com/eclipse-keypont/pkcs11-go)
+  is in. This changes the concrete type behind the public `Attribute` alias.
+- Module path is now `github.com/eclipse-keypont/crypto11/v2`.
+- The configuration file was renamed to `crypto11.config.json`.
+
+### Added
+
+- **PKCS#11 v3.2 support**, via the new pkcs11-go binding.
+- **Post-quantum ML-KEM** key generation, encapsulation and decapsulation (ML-KEM 512/768/1024,
+  FIPS 203 / `CKM_ML_KEM`) through new `MLKEMEncapsulator` / `MLKEMDecapsulator` interfaces
+  (`mlkem.go`).
+- `MLKEMDeriveKey`, a KMAC-based key derivation helper for turning ML-KEM shared secrets into
+  usable keys.
+- `make release VERSION=x.y.z` target: tags, signs, and pushes a release, triggering a
+  SLSA3-attested build.
+- `make lint`, `make lint-fix`, `make notices`, `make version` Makefile targets.
+- `govulncheck` target and CI workflow.
+
+### Security
+
+A dedicated audit found and fixed 7 issues:
+
+- **High**: `UseGCMIVFromHSM` only length-checked the HSM-generated GCM IV instead of copying it
+  back to the caller's buffer, making ciphertext undecryptable or risking GCM nonce reuse.
+- **Medium**: out-of-bounds unsafe read in `bytesToUlong` when handling attributes shorter than
+  `sizeof(CK_ULONG)` (e.g. a 4-byte `CKA_PARAMETER_SET`).
+- **Medium**: object handles were left dangling after `Delete`, `Close` was not idempotent
+  (a second call could panic via the module refcount), the module cache was keyed inconsistently
+  by path, and the PIN was never wiped from memory.
+- **Low**: missing bounds checks and unknown-`paramSet` validation in the new ML-KEM code.
+- Ported an upstream fix (ThalesGroup PR #135): HMAC sessions were leaked on mid-operation error
+  paths and could be returned to the pool twice; key-gen fallback broadened for SoftHSM/Utimaco.
+
+### Changed
+
+- Internal resource pool (`internal/pool`) reimplemented on native `sync/atomic` typed values,
+  removing a hand-rolled 64-bit alignment footgun (relevant to ARM/Raspberry Pi targets).
+- Full `golangci-lint` cleanup: ineffassign, prealloc, unconvert, revive exported-comment/
+  error-string findings, renamed `errNoCkaId` → `errNoCkaID`, removed deprecated `rand.Seed` calls.
+- Test suite hardened to skip gracefully rather than fail when a token doesn't support a given
+  mechanism (DSA, HMAC, PSS, etc.), avoid nil-pointer panics, and de-duplicate slot discovery.
+- Repository moved from `github.com/ThalesGroup/crypto11` to `github.com/eclipse-keypont/crypto11`
+  (Eclipse Foundation donation).
+
+### CI/CD & supply chain
+
+- Unified security/quality pipeline shared across the pkcs11-go / crypto11 / gose projects:
+  CodeQL, govulncheck, Gitleaks secret scanning, OpenSSF Scorecard, dependency review, and
+  golangci-lint gate every push.
+- All third-party GitHub Actions pinned to commit SHAs.
+- Tagged releases now produce a signed, **SLSA level 3**-attested source archive
+  (via [slsa-github-generator](https://github.com/slsa-framework/slsa-github-generator) and
+  keyless [cosign](https://github.com/sigstore/cosign)) instead of being pushed unsigned — see
+  [Verifying release artifacts](./README.md#verifying-release-artifacts) in the README.
+
+## Pre-v2 (ThalesGroup era, v0.1.0 – v1.7.0-rc1)
+
+Originally maintained at `github.com/ThalesGroup/crypto11` (previously `ThalesIgnite/crypto11`),
+built on `miekg/pkcs11`. Notable milestones:
+
+- **v1.0.0**: ground-up rewrite of the v0.x API.
+- **v1.1.0**: support for finding multiple keys and reading key attributes.
+- **v1.2.5**: Thales-proprietary `CKU_CRYPTO_USER` support.
+- **v1.3.0**: RSA support for asymmetric decryption.
+- **v1.4.1**: PKCS#11 library context reuse via reference counting, allowing multiple contexts to
+  the same library.
+- **v1.6.3 – v1.6.4**: repository moved to `github.com/eclipse-keypont/crypto11`.
+- **v1.6.5**: donated to the Eclipse Foundation.
+- **v1.7.0-rc1**: final pre-v2 release candidate, still on `miekg/pkcs11` / Go module path v1.
+
+Full commit history for these releases is available via `git log v0.1.0..v1.7.0-rc1` or the
+[GitHub Releases](https://github.com/eclipse-keypont/crypto11/releases) page.
