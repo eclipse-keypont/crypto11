@@ -22,6 +22,11 @@ crypto11 builds the familiar `crypto.Signer` / `crypto.Decrypter` Go interfaces 
 ML-KEM key support, alongside a full lint/vet cleanup and a security-hardening pass. See
 [Releases](https://github.com/eclipse-keypont/crypto11/releases) for the full history.
 
+This repository is built with a hardened GitHub Actions pipeline: golangci-lint, govulncheck, CodeQL, secret
+scanning, dependency review, and an OpenSSF Scorecard rating gate every push, and tagged releases are
+signed and SLSA3-attested rather than just pushed — see [Verifying release artifacts](#verifying-release-artifacts)
+below for what ships and how to check it.
+
 # Supported Algorithms
 
 ## Asymmetric keys

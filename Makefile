@@ -1,11 +1,15 @@
 # SPDX-FileCopyrightText: 2026 Thales Group and the crypto11 Contributors
 # SPDX-License-Identifier: MIT
 
-.PHONY: build test lint lint-fix govulncheck notices version release
+.PHONY: build vet test lint lint-fix govulncheck notices version release
 
 # ── Build ────────────────────────────────────────────────────────────────────
 build:
 	go build ./...
+
+# ── Vet ──────────────────────────────────────────────────────────────────────
+vet:
+	go vet ./...
 
 # ── Tests ────────────────────────────────────────────────────────────────────
 # Plain `go test ./...` works standalone: TestMain (setup_test.go) skips the
