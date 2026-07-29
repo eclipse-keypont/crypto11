@@ -21,6 +21,11 @@
 
 // Package crypto11 enables access to cryptographic keys from PKCS#11 using Go crypto API.
 //
+// Deprecated: github.com/ThalesGroup/crypto11 is frozen as of this release and will
+// receive no further updates, including security fixes. Development continues at
+// github.com/eclipse-keypont/crypto11. Update your import paths and go.mod requirement
+// to that module.
+//
 // # Configuration
 //
 // PKCS#11 tokens are accessed via Context objects. Each Context connects to one token.
