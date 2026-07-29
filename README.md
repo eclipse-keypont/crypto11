@@ -1,8 +1,7 @@
 Crypto11
 ========
 
-[![GoDoc](https://godoc.org/github.com/ThalesIgnite/crypto11?status.svg)](https://godoc.org/github.com/ThalesIgnite/crypto11)
-[![Build Status](https://travis-ci.com/ThalesIgnite/crypto11.svg?branch=master)](https://travis-ci.com/ThalesIgnite/crypto11)
+[![Go Reference](https://pkg.go.dev/badge/github.com/eclipse-keypont/crypto11.svg)](https://pkg.go.dev/github.com/eclipse-keypont/crypto11)
 
 This is an implementation of the standard Golang crypto interfaces that
 uses [PKCS#11](http://docs.oasis-open.org/pkcs11/pkcs11-base/v2.40/errata01/os/pkcs11-base-v2.40-errata01-os-complete.html)
@@ -27,7 +26,7 @@ decryption through
 
 To verify signatures or encrypt messages, retrieve the public key and do it in software.
 
-See [the documentation](https://godoc.org/github.com/ThalesIgnite/crypto11) for details of various limitations,
+See [the documentation](https://pkg.go.dev/github.com/eclipse-keypont/crypto11) for details of various limitations,
 especially regarding symmetric crypto.
 
 
@@ -48,12 +47,12 @@ Since v1.0.0, crypto11 requires Go v1.11+. Install the library by running:
 > See [#137](https://github.com/thales-transfer/crypto11/issues/137) for context.
 
 ```bash
-go get github.com/ThalesGroup/crypto11
+go get github.com/eclipse-keypont/crypto11
 ```
 
 The crypto11 library needs to be configured with information about your PKCS#11 installation. This is either done
 programmatically
-(see the `Config` struct in [the documentation](https://godoc.org/github.com/ThalesIgnite/crypto11)) or via a
+(see the `Config` struct in [the documentation](https://pkg.go.dev/github.com/eclipse-keypont/crypto11)) or via a
 configuration
 file. The configuration file is a JSON representation of the `Config` struct.
 
