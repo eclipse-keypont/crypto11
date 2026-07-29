@@ -1,7 +1,12 @@
 Crypto11
 ========
 
-[![GoDoc](https://godoc.org/github.com/ThalesIgnite/crypto11?status.svg)](https://godoc.org/github.com/ThalesIgnite/crypto11)
+> **⚠ Deprecated.** `github.com/ThalesGroup/crypto11` is frozen as of this release and will
+> receive no further updates, including security fixes. Development continues at
+> [github.com/eclipse-keypont/crypto11](https://github.com/eclipse-keypont/crypto11) — update your
+> import paths and `go.mod` requirement to that module.
+
+[![Go Reference](https://pkg.go.dev/badge/github.com/ThalesGroup/crypto11.svg)](https://pkg.go.dev/github.com/ThalesGroup/crypto11)
 [![Build Status](https://travis-ci.com/ThalesIgnite/crypto11.svg?branch=master)](https://travis-ci.com/ThalesIgnite/crypto11)
 
 This is an implementation of the standard Golang crypto interfaces that
