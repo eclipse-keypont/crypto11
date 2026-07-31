@@ -3,6 +3,24 @@
 
 .PHONY: build vet test lint lint-fix govulncheck notices sbom version release
 
+# ── Tool preconditions ───────────────────────────────────────────────────────
+# $(call require,<binary>,<how to install it>) — fail early with an install hint.
+#
+# Probes by running the tool, not `command -v`: a goenv shim stays on PATH even
+# when the tool is not installed for the active Go version, so `command -v` says
+# yes and the build dies later. Exit 127 (missing binary or dead shim) is the
+# only status treated as missing; tools without --version exit 1 or 2 and pass.
+#
+# A hint must not contain a comma — make would read it as another $(call) argument.
+define require
+@$(1) --version >/dev/null 2>&1; \
+if [ $$? -eq 127 ]; then \
+    echo "$(1) not found. Install it with:"; \
+    echo "  $(2)"; \
+    exit 1; \
+fi
+endef
+
 # ── Build ────────────────────────────────────────────────────────────────────
 build:
 	go build ./...
@@ -29,17 +47,15 @@ test:
 #   go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest
 # Ensure $(go env GOPATH)/bin is on your PATH, then `golangci-lint version`.
 GOLANGCI_LINT ?= golangci-lint
+GOLANGCI_LINT_INSTALL_HINT := go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest
 
 lint:
-	@command -v $(GOLANGCI_LINT) >/dev/null 2>&1 || { \
-	    echo "golangci-lint not found. Install the v2 binary with:"; \
-	    echo "  go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest"; \
-	    exit 1; \
-	}
+	$(call require,$(GOLANGCI_LINT),$(GOLANGCI_LINT_INSTALL_HINT))
 	$(GOLANGCI_LINT) run ./...
 
 # Auto-fix the mechanically-fixable findings (formatting, some conversions):
 lint-fix:
+	$(call require,$(GOLANGCI_LINT),$(GOLANGCI_LINT_INSTALL_HINT))
 	$(GOLANGCI_LINT) run --fix ./...
 
 # ── Vulnerability scan ───────────────────────────────────────────────────────
@@ -51,11 +67,7 @@ lint-fix:
 GOVULNCHECK ?= govulncheck
 
 govulncheck:
-	@command -v $(GOVULNCHECK) >/dev/null 2>&1 || { \
-	    echo "govulncheck not found. Install it with:"; \
-	    echo "  go install golang.org/x/vuln/cmd/govulncheck@latest"; \
-	    exit 1; \
-	}
+	$(call require,$(GOVULNCHECK),go install golang.org/x/vuln/cmd/govulncheck@latest)
 	$(GOVULNCHECK) -show verbose ./...
 
 # ── Licenses ─────────────────────────────────────────────────────────────────
@@ -78,11 +90,7 @@ govulncheck:
 GO_LICENSES ?= go-licenses
 
 notices:
-	@command -v $(GO_LICENSES) >/dev/null 2>&1 || { \
-	    echo "go-licenses not found. Install it with:"; \
-	    echo "  go install github.com/google/go-licenses@latest"; \
-	    exit 1; \
-	}
+	$(call require,$(GO_LICENSES),go install github.com/google/go-licenses@latest)
 	@{ $(GO_LICENSES) report ./... --ignore github.com/eclipse-keypont/crypto11 --template go-licenses.tpl > NOTICES.md.tmp && \
 	   printf '\n## Vendored source (in-tree)\n\nThe following code is copied directly into this repository and is not a Go module dependency, so it is not covered by the table above.\n\n| Path | Origin | License | License file |\n|------|--------|---------|--------------|\n| `internal/pool` | `github.com/thales-e-security/pool` (extracted from `vitess.io/vitess`) | Apache-2.0 | [internal/pool/LICENSE](internal/pool/LICENSE) |\n' >> NOTICES.md.tmp && \
 	   mv NOTICES.md.tmp NOTICES.md; } || { rm -f NOTICES.md.tmp; exit 1; }
@@ -106,11 +114,7 @@ CYCLONEDX_GOMOD ?= cyclonedx-gomod
 SBOM_FILE       ?= crypto11.cdx.json
 
 sbom:
-	@command -v $(CYCLONEDX_GOMOD) >/dev/null 2>&1 || { \
-	    echo "cyclonedx-gomod not found. Install it with:"; \
-	    echo "  go install github.com/CycloneDX/cyclonedx-gomod/cmd/cyclonedx-gomod@v1.10.0"; \
-	    exit 1; \
-	}
+	$(call require,$(CYCLONEDX_GOMOD),go install github.com/CycloneDX/cyclonedx-gomod/cmd/cyclonedx-gomod@v1.10.0)
 	$(CYCLONEDX_GOMOD) mod -json -licenses -std -type library \
 	    -noserial -notimestamp -output $(SBOM_FILE) .
 	@echo "$(SBOM_FILE) generated"
