@@ -45,6 +45,19 @@ A dedicated audit found and fixed 7 issues:
 - Ported an upstream fix (ThalesGroup PR #135): HMAC sessions were leaked on mid-operation error
   paths and could be returned to the pool twice; key-gen fallback broadened for SoftHSM/Utimaco.
 
+### Fixed
+
+- Key enumeration no longer aborts on a key type the package cannot represent
+  ([#68](https://github.com/eclipse-keypont/crypto11/issues/68), reported by
+  [@Knacktus](https://github.com/Knacktus) and independently run into by
+  [@droppingin](https://github.com/droppingin), who cross-referenced it from
+  [#103](https://github.com/eclipse-keypont/crypto11/pull/103) — thank you both for the long wait).
+  A single unsupported object — an ML-KEM key pair generated with this release, say — used to make
+  `FindAllKeyPairs`, `FindAllKeys`, `FindPrivateKeysWithAttributes`,
+  `FindKeyRSAPairsWithAttributes` and `FindAllPairedCertificates` fail outright with
+  `unsupported key type: %X`, hiding every other key on the token. Such objects are now skipped,
+  like keys with no CKA_ID or no public half.
+
 ### Changed
 
 - Internal resource pool (`internal/pool`) reimplemented on native `sync/atomic` typed values,

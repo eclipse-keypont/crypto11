@@ -314,7 +314,7 @@ func (c *Context) makeRSAKeyPair(session *pkcs11Session, privHandle *pkcs11.Obje
 		return result, certificate, nil
 
 	default:
-		return nil, nil, fmt.Errorf("not an RSA key pair: %X", keyType)
+		return nil, nil, fmt.Errorf("not an RSA key pair: %X: %w", keyType, errUnsupportedKeyType)
 	}
 }
 
@@ -382,6 +382,7 @@ func (c *Context) FindRSAKeyPairs(id []byte, label []byte) (signer []SignerDecry
 // matching public key.
 // If the private key is found, but the public key with a corresponding CKA_ID is not, the key is
 // not returned because we cannot implement crypto.Signer of SignerDecrypter without the public key.
+// Private keys that are not RSA are skipped.
 func (c *Context) FindKeyRSAPairsWithAttributes(attributes AttributeSet) (signer []SignerDecrypter, err error) {
 	if c.closed.Get() {
 		return nil, errClosed
@@ -409,7 +410,8 @@ func (c *Context) FindKeyRSAPairsWithAttributes(attributes AttributeSet) (signer
 		for _, privHandle := range privHandles {
 			k, _, err := c.makeRSAKeyPair(session, &privHandle)
 
-			if errors.Is(err, errNoCkaID) || errors.Is(err, errNoPublicHalf) {
+			if errors.Is(err, errNoCkaID) || errors.Is(err, errNoPublicHalf) ||
+				errors.Is(err, errUnsupportedKeyType) {
 				continue
 			}
 			if err != nil {

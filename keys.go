@@ -20,6 +20,11 @@ var errNoCkaID = errors.New("private key has no CKA_ID")
 // errNoPublicHalf is returned if a public half cannot be found to match a given private key
 var errNoPublicHalf = errors.New("could not find public key to match private key")
 
+// errUnsupportedKeyType is returned if a key object's CKA_KEY_TYPE is not one this package can
+// represent. Enumeration functions skip such objects instead of failing, so that a single key of
+// an unknown type (an ML-KEM key pair, say) does not hide every other key on the token.
+var errUnsupportedKeyType = errors.New("unsupported key type")
+
 func findKeysWithAttributes(session *pkcs11Session, template []*pkcs11.Attribute) (handles []pkcs11.ObjectHandle, err error) {
 	if err = session.ctx.FindObjectsInit(session.handle, template); err != nil {
 		return nil, err
@@ -215,7 +220,7 @@ func (c *Context) makeKeyPair(session *pkcs11Session, privHandle *pkcs11.ObjectH
 		return result, certificate, nil
 
 	default:
-		return nil, nil, errors.Errorf("unsupported key type: %X", keyType)
+		return nil, nil, fmt.Errorf("%w: %X", errUnsupportedKeyType, keyType)
 	}
 }
 
@@ -306,6 +311,7 @@ func (c *Context) FindKeyPairWithAttributes(attributes AttributeSet) (Signer, er
 // Only private keys that have a non-empty CKA_ID will be found, as this is required to locate the matching public key.
 // If the private key is found, but the public key with a corresponding CKA_ID is not, the key is not returned
 // because we cannot implement crypto.Signer without the public key.
+// Keys whose type this package cannot represent as a Signer (ML-KEM key pairs, for example) are skipped.
 func (c *Context) FindKeyPairsWithAttributes(attributes AttributeSet) (signer []Signer, err error) {
 	if c.closed.Get() {
 		return nil, errClosed
@@ -333,7 +339,8 @@ func (c *Context) FindKeyPairsWithAttributes(attributes AttributeSet) (signer []
 		for _, privHandle := range privHandles {
 			k, _, err := c.makeKeyPair(session, &privHandle)
 
-			if errors.Is(err, errNoCkaID) || errors.Is(err, errNoPublicHalf) {
+			if errors.Is(err, errNoCkaID) || errors.Is(err, errNoPublicHalf) ||
+				errors.Is(err, errUnsupportedKeyType) {
 				continue
 			}
 			if err != nil {
@@ -357,6 +364,7 @@ func (c *Context) FindKeyPairsWithAttributes(attributes AttributeSet) (signer []
 //
 // If a private key is found, but the corresponding public key is not, the key is not returned because we cannot
 // implement crypto.Signer without the public key.
+// Keys whose type this package cannot represent as a Signer (ML-KEM key pairs, for example) are skipped.
 func (c *Context) FindAllKeyPairs() ([]Signer, error) {
 	if c.closed.Get() {
 		return nil, errClosed
@@ -443,6 +451,7 @@ func (c *Context) FindKeyWithAttributes(attributes AttributeSet) (*SecretKey, er
 }
 
 // FindKeysWithAttributes retrieves previously created symmetric keys, or a nil slice if none can be found.
+// Keys of a type this package has no Cipher for are skipped.
 func (c *Context) FindKeysWithAttributes(attributes AttributeSet) ([]*SecretKey, error) {
 	if c.closed.Get() {
 		return nil, errClosed
@@ -476,12 +485,13 @@ func (c *Context) FindKeysWithAttributes(attributes AttributeSet) ([]*SecretKey,
 			}
 			keyType := bytesToUlong(attributes[0].Value)
 
-			if cipher, ok := Ciphers[int(keyType)]; ok {
-				k := &SecretKey{pkcs11Object{privHandle, c}, cipher}
-				keys = append(keys, k)
-			} else {
-				return errors.Errorf("unsupported key type: %X", keyType)
+			cipher, ok := Ciphers[int(keyType)]
+			if !ok {
+				// Not a cipher we can represent; skip it rather than hiding every other key.
+				continue
 			}
+
+			keys = append(keys, &SecretKey{pkcs11Object{privHandle, c}, cipher})
 		}
 
 		return nil
@@ -533,7 +543,7 @@ func (c *Context) makePrivateKey(session *pkcs11Session, privHandle *pkcs11.Obje
 		return result, nil
 
 	default:
-		return nil, errors.Errorf("unsupported key type: %X", keyType)
+		return nil, fmt.Errorf("%w: %X", errUnsupportedKeyType, keyType)
 	}
 }
 
@@ -608,6 +618,7 @@ func (c *Context) FindPrivateKeyWithAttributes(attributes AttributeSet) (Private
 
 // FindPrivateKeysWithAttributes retrieves previously created asymmetric private keys, or nil if none can be found.
 // The given attributes are matched against the private half only.
+// Keys whose type this package cannot represent as a PrivateKey (ML-KEM keys, for example) are skipped.
 func (c *Context) FindPrivateKeysWithAttributes(attributes AttributeSet) (signer []PrivateKey, err error) {
 	if c.closed.Get() {
 		return nil, errClosed
@@ -634,6 +645,9 @@ func (c *Context) FindPrivateKeysWithAttributes(attributes AttributeSet) (signer
 
 		for _, privHandle := range privHandles {
 			k, err := c.makePrivateKey(session, &privHandle)
+			if errors.Is(err, errUnsupportedKeyType) {
+				continue
+			}
 			if err != nil {
 				return err
 			}

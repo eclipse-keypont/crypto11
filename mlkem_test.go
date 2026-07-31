@@ -39,6 +39,7 @@ func TestMLKEM(t *testing.T) {
 	t.Run("FindByID", func(t *testing.T) { testMLKEMFindByID(t, ctx) })
 	t.Run("FindByLabel", func(t *testing.T) { testMLKEMFindByLabel(t, ctx) })
 	t.Run("Delete", func(t *testing.T) { testMLKEMDelete(t, ctx) })
+	t.Run("OtherFindersStillWork", func(t *testing.T) { testMLKEMOtherFindersStillWork(t, ctx) })
 }
 
 func testMLKEMGenerate(t *testing.T, ctx *Context, paramSet MLKEMParameterSet) {
@@ -107,6 +108,38 @@ func testMLKEMFindByLabel(t *testing.T, ctx *Context) {
 	require.NoError(t, err)
 	require.NotNil(t, found)
 	assert.Equal(t, MLKEM768, found.ParameterSet())
+}
+
+// testMLKEMOtherFindersStillWork checks that an ML-KEM key pair sitting on the token does not
+// abort enumeration of the key types this package does support. Finders skip keys they cannot
+// represent instead of returning "unsupported key type".
+func testMLKEMOtherFindersStillWork(t *testing.T, ctx *Context) {
+	t.Helper()
+
+	mlkemKey, err := ctx.GenerateMLKEMKeyPair(randomBytes(), MLKEM768)
+	require.NoError(t, err)
+	defer func() { _ = mlkemKey.Delete() }()
+
+	label := randomBytes()
+	rsaKey, err := ctx.GenerateRSAKeyPairWithLabel(randomBytes(), label, rsaSize)
+	require.NoError(t, err)
+	defer func() { _ = rsaKey.Delete() }()
+
+	pairs, err := ctx.FindAllKeyPairs()
+	require.NoError(t, err, "an ML-KEM key pair must not abort key pair enumeration")
+	assert.NotEmpty(t, pairs)
+
+	found, err := ctx.FindKeyPair(nil, label)
+	require.NoError(t, err)
+	assert.NotNil(t, found)
+
+	privKeys, err := ctx.FindPrivateKeysWithAttributes(NewAttributeSet())
+	require.NoError(t, err, "an ML-KEM private key must not abort private key enumeration")
+	assert.NotEmpty(t, privKeys)
+
+	rsaPairs, err := ctx.FindKeyRSAPairsWithAttributes(NewAttributeSet())
+	require.NoError(t, err, "an ML-KEM key pair must not abort RSA key pair enumeration")
+	assert.NotEmpty(t, rsaPairs)
 }
 
 func testMLKEMDelete(t *testing.T, ctx *Context) {
