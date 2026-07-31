@@ -11,6 +11,11 @@ demo/demo
 # scratch file `make notices` writes before atomically replacing NOTICES.md
 NOTICES.md.tmp
 
+# locally generated SBOMs and release artifacts (`make sbom`, release assets)
+*.cdx.json
+crypto11-v*.tar.gz
+crypto11-v*.tar.gz.*
+crypto11-v*.intoto.jsonl
 
 # ignore local changes of crypto11.config.json that a user configures to run
 # tests. The user modiiesy the local config with a local PATH for SoftHSMv3.

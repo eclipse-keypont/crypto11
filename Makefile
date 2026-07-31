@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: 2026 Thales Group and the crypto11 Contributors
 # SPDX-License-Identifier: MIT
 
-.PHONY: build vet test lint lint-fix govulncheck notices version release
+.PHONY: build vet test lint lint-fix govulncheck notices sbom version release
 
 # ── Build ────────────────────────────────────────────────────────────────────
 build:
@@ -88,6 +88,33 @@ notices:
 	   mv NOTICES.md.tmp NOTICES.md; } || { rm -f NOTICES.md.tmp; exit 1; }
 	@echo "NOTICES.md generated"
 
+# ── SBOM ─────────────────────────────────────────────────────────────────────
+# Generates a CycloneDX 1.6 SBOM with the exact same flags as the release
+# workflow (.github/workflows/release.yml), so an auditor can regenerate the
+# published crypto11-vX.Y.Z.cdx.json from the tagged source and compare hashes.
+#
+# -std includes the Go standard library as a component (stdlib CVEs stay visible
+# to SBOM consumers); -licenses records detected licenses as evidence; test-only
+# dependencies are excluded — they are not part of what consumers link against.
+# -noserial -notimestamp drop the two nondeterministic fields, making the output
+# byte-reproducible for a given tag on a given GOOS/GOARCH (purls carry
+# goos/goarch qualifiers, so regenerate on linux/amd64 to match the release).
+#
+# Install cyclonedx-gomod (same version as CI):
+#   go install github.com/CycloneDX/cyclonedx-gomod/cmd/cyclonedx-gomod@v1.10.0
+CYCLONEDX_GOMOD ?= cyclonedx-gomod
+SBOM_FILE       ?= crypto11.cdx.json
+
+sbom:
+	@command -v $(CYCLONEDX_GOMOD) >/dev/null 2>&1 || { \
+	    echo "cyclonedx-gomod not found. Install it with:"; \
+	    echo "  go install github.com/CycloneDX/cyclonedx-gomod/cmd/cyclonedx-gomod@v1.10.0"; \
+	    exit 1; \
+	}
+	$(CYCLONEDX_GOMOD) mod -json -licenses -std -type library \
+	    -noserial -notimestamp -output $(SBOM_FILE) .
+	@echo "$(SBOM_FILE) generated"
+
 # ── Release ───────────────────────────────────────────────────────────────────
 # Versioning is git-tag only — there is no in-repo version file/const to bump
 # (unlike pkcs11-go, which derives its tag from cryptoki/version.go).
@@ -98,8 +125,9 @@ notices:
 # The tag is created with `git tag -s` (GPG/SSH-signed, per your git signing
 # config) so consumers can `git verify-tag v$VERSION`. Pushing the tag triggers
 # .github/workflows/release.yml, which gates on Lint + govulncheck, then builds
-# a signed source archive with SLSA3 provenance. `go get` consumers still rely
-# on go.sum + sum.golang.org, not on these release assets.
+# a signed source archive and a signed CycloneDX SBOM, both covered by SLSA3
+# provenance. `go get` consumers still rely on go.sum + sum.golang.org, not on
+# these release assets.
 version:
 	@git describe --tags --abbrev=0 2>/dev/null || echo "no tags yet"
 

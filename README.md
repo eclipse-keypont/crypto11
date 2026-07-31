@@ -25,9 +25,9 @@ ML-KEM key support, alongside a full lint/vet cleanup and a security-hardening p
 [Releases](https://github.com/eclipse-keypont/crypto11/releases) for the full commit-level history.
 
 This repository is built with a hardened GitHub Actions pipeline: golangci-lint, govulncheck, CodeQL, secret
-scanning, dependency review, and an OpenSSF Scorecard rating gate every push, and tagged releases are
-signed and SLSA3-attested rather than just pushed — see [Verifying release artifacts](#verifying-release-artifacts)
-below for what ships and how to check it.
+scanning, dependency review, and an OpenSSF Scorecard rating gate every push, and tagged releases ship a signed,
+SLSA3-attested source archive plus a signed [CycloneDX SBOM](#software-bill-of-materials) rather than just being
+pushed — see [Verifying release artifacts](#verifying-release-artifacts) below for what ships and how to check it.
 
 # Part of Eclipse Keypont
 
@@ -357,38 +357,46 @@ GitHub. For a release `vX.Y.Z` you'll find:
 | `crypto11-vX.Y.Z.tar.gz` | The source archive, built with `git archive` from the tagged commit |
 | `crypto11-vX.Y.Z.tar.gz.sha256` | SHA-256 checksum of the archive |
 | `crypto11-vX.Y.Z.tar.gz.cosign.bundle` | Keyless [cosign](https://github.com/sigstore/cosign) signature (signed via GitHub Actions OIDC — no private key involved) |
-| `crypto11-vX.Y.Z.tar.gz.intoto.jsonl` | [SLSA3](https://slsa.dev/) build provenance, produced by [slsa-github-generator](https://github.com/slsa-framework/slsa-github-generator) |
+| `crypto11-vX.Y.Z.cdx.json` | [CycloneDX](https://cyclonedx.org/) 1.6 SBOM of the module — see [Software Bill of Materials](#software-bill-of-materials) |
+| `crypto11-vX.Y.Z.cdx.json.sha256` | SHA-256 checksum of the SBOM |
+| `crypto11-vX.Y.Z.cdx.json.cosign.bundle` | Keyless cosign signature of the SBOM |
+| `crypto11-vX.Y.Z.intoto.jsonl` | [SLSA3](https://slsa.dev/) build provenance covering **both** the archive and the SBOM, produced by [slsa-github-generator](https://github.com/slsa-framework/slsa-github-generator) |
 
-Download all four assets for the release you want to verify:
+Download all assets for the release you want to verify:
 
 ```sh
 gh release download vX.Y.Z --repo eclipse-keypont/crypto11
 ```
 
-**1. Verify the checksum**
+**1. Verify the checksums**
 
 ```sh
 sha256sum -c crypto11-vX.Y.Z.tar.gz.sha256
+sha256sum -c crypto11-vX.Y.Z.cdx.json.sha256
 ```
 
-**2. Verify the cosign signature** (requires [cosign](https://docs.sigstore.dev/cosign/system_config/installation/))
+**2. Verify the cosign signatures** (requires [cosign](https://docs.sigstore.dev/cosign/system_config/installation/))
 
 ```sh
-cosign verify-blob \
-  --bundle crypto11-vX.Y.Z.tar.gz.cosign.bundle \
-  --certificate-identity-regexp '^https://github\.com/eclipse-keypont/crypto11/\.github/workflows/release\.yml@refs/tags/v.*$' \
-  --certificate-oidc-issuer 'https://token.actions.githubusercontent.com' \
-  crypto11-vX.Y.Z.tar.gz
+for f in crypto11-vX.Y.Z.tar.gz crypto11-vX.Y.Z.cdx.json; do
+  cosign verify-blob \
+    --bundle "$f.cosign.bundle" \
+    --certificate-identity-regexp '^https://github\.com/eclipse-keypont/crypto11/\.github/workflows/release\.yml@refs/tags/v.*$' \
+    --certificate-oidc-issuer 'https://token.actions.githubusercontent.com' \
+    "$f"
+done
 ```
 
 **3. Verify the SLSA provenance** (requires [slsa-verifier](https://github.com/slsa-framework/slsa-verifier))
 
+The provenance has two subjects — the archive and the SBOM — so verify both in one call:
+
 ```sh
 slsa-verifier verify-artifact \
-  --provenance-path crypto11-vX.Y.Z.tar.gz.intoto.jsonl \
+  --provenance-path crypto11-vX.Y.Z.intoto.jsonl \
   --source-uri github.com/eclipse-keypont/crypto11 \
   --source-tag vX.Y.Z \
-  crypto11-vX.Y.Z.tar.gz
+  crypto11-vX.Y.Z.tar.gz crypto11-vX.Y.Z.cdx.json
 ```
 
 **4. Verify the git tag itself** — release tags are GPG/SSH-signed by `make release` (`git tag -s`):
@@ -400,6 +408,36 @@ git verify-tag vX.Y.Z
 `go get` consumers don't need any of this — they fetch source through the Go module proxy and verify it via
 `go.sum` / `sum.golang.org`. These assets exist for auditors and to satisfy OpenSSF Scorecard's Signed-Releases
 check.
+
+# Software Bill of Materials
+
+Every release ships a [CycloneDX](https://cyclonedx.org/) 1.6 SBOM (`crypto11-vX.Y.Z.cdx.json`), generated with
+[`cyclonedx-gomod`](https://github.com/CycloneDX/cyclonedx-gomod) and signed and attested exactly like the source
+archive (see [Verifying release artifacts](#verifying-release-artifacts)). It describes:
+
+* the `crypto11` component itself, typed as a **library**, with its module path, version and VCS reference;
+* its build-time dependency graph — `pkcs11-go` and `pkg/errors` — as `pkg:golang/...` PackageURLs;
+* the **Go standard library** as a component (`pkg:golang/std@goX.Y.Z`), so stdlib CVEs stay visible to SBOM
+  consumers, matching what `govulncheck` covers;
+* detected **licenses**, recorded as CycloneDX evidence rather than assertions (detection is heuristic).
+
+Test-only dependencies (`testify` and friends) are deliberately excluded: they are not part of what a consumer of
+the library links against, and including them produces false positives in downstream vulnerability scanners.
+
+Regenerate the SBOM yourself with the same flags CI uses:
+
+```sh
+go install github.com/CycloneDX/cyclonedx-gomod/cmd/cyclonedx-gomod@v1.10.0
+make sbom          # writes crypto11.cdx.json
+```
+
+The SBOM is generated with `-noserial -notimestamp`, so it is byte-reproducible from the tagged commit — checking
+out `vX.Y.Z` and running `make sbom` on linux/amd64 yields the same content as the published artifact (the
+`goos`/`goarch` PackageURL qualifiers make the output platform-specific).
+
+Feed it into whatever consumes CycloneDX — for example
+[Dependency-Track](https://dependencytrack.org/), [osv-scanner](https://github.com/google/osv-scanner)
+(`osv-scanner scan source --sbom crypto11-vX.Y.Z.cdx.json`) or `grype sbom:crypto11-vX.Y.Z.cdx.json`.
 
 # Contributions
 
