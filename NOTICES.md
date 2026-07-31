@@ -4,7 +4,8 @@ This project uses the following third-party Go modules.
 
 | Package | License | License URL |
 |---------|---------|-------------|
-| `github.com/pkg/errors` | BSD-2-Clause | [Link](https://github.com/eclipse-keypont/crypto11/blob/HEAD/vendor/github.com/pkg/errors/LICENSE) |
+| `github.com/eclipse-keypont/pkcs11-go` | MIT | [Link](https://github.com/eclipse-keypont/pkcs11-go/blob/v1.0.0/LICENSE) |
+| `github.com/pkg/errors` | BSD-2-Clause | [Link](https://github.com/pkg/errors/blob/v0.9.1/LICENSE) |
 
 ## Vendored source (in-tree)
 

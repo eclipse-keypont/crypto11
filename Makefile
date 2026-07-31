@@ -58,10 +58,34 @@ govulncheck:
 	}
 	$(GOVULNCHECK) -show verbose ./...
 
-## Licenses
+# ── Licenses ─────────────────────────────────────────────────────────────────
+# Regenerates NOTICES.md from the module graph, rendering go-licenses.tpl.
+#
+# Expected on every run: klog "W... contains non-Go code that can't be inspected
+# for further dependencies" warnings for pkcs11-go's cgo shim and PKCS#11
+# headers. These are warnings on stderr, not errors — go-licenses resolves the
+# import graph by parsing Go source and simply cannot follow .c/.h files (which
+# have no Go imports to follow anyway). The target still exits 0. They cannot be
+# silenced: go-licenses registers klog's --logtostderr/--stderrthreshold flags
+# but ignores them, and filtering stderr here would also hide real failures.
+#
+# Only non-test dependencies are listed — consumers never compile *_test.go, so
+# testify and its indirect deps are intentionally absent. Pass --include_tests
+# to change that.
+#
+# Install go-licenses:
+#   go install github.com/google/go-licenses@latest
+GO_LICENSES ?= go-licenses
+
 notices:
-	@go-licenses report ./... --ignore github.com/eclipse-keypont/crypto11,github.com/eclipse-keypont/pkcs11-go --template go-licenses.tpl > NOTICES.md
-	@printf '\n## Vendored source (in-tree)\n\nThe following code is copied directly into this repository and is not a Go module dependency, so it is not covered by the table above.\n\n| Path | Origin | License | License file |\n|------|--------|---------|--------------|\n| `internal/pool` | `github.com/thales-e-security/pool` (extracted from `vitess.io/vitess`) | Apache-2.0 | [internal/pool/LICENSE](internal/pool/LICENSE) |\n' >> NOTICES.md
+	@command -v $(GO_LICENSES) >/dev/null 2>&1 || { \
+	    echo "go-licenses not found. Install it with:"; \
+	    echo "  go install github.com/google/go-licenses@latest"; \
+	    exit 1; \
+	}
+	@{ $(GO_LICENSES) report ./... --ignore github.com/eclipse-keypont/crypto11 --template go-licenses.tpl > NOTICES.md.tmp && \
+	   printf '\n## Vendored source (in-tree)\n\nThe following code is copied directly into this repository and is not a Go module dependency, so it is not covered by the table above.\n\n| Path | Origin | License | License file |\n|------|--------|---------|--------------|\n| `internal/pool` | `github.com/thales-e-security/pool` (extracted from `vitess.io/vitess`) | Apache-2.0 | [internal/pool/LICENSE](internal/pool/LICENSE) |\n' >> NOTICES.md.tmp && \
+	   mv NOTICES.md.tmp NOTICES.md; } || { rm -f NOTICES.md.tmp; exit 1; }
 	@echo "NOTICES.md generated"
 
 # ── Release ───────────────────────────────────────────────────────────────────
