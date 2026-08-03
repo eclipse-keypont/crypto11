@@ -4,64 +4,18 @@
 package crypto11
 
 import (
-	"C"
 	"encoding/asn1"
 	"math/big"
-	"unsafe"
 
 	pkcs11 "github.com/eclipse-keypont/pkcs11-go/cryptoki"
 	"github.com/pkg/errors"
 )
 
-func ulongToBytes(n uint) []byte {
-	return C.GoBytes(unsafe.Pointer(&n), C.sizeof_ulong) // ugh!
-}
-
-func bytesToUlong(bs []byte) (n uint) {
-	sliceSize := len(bs)
-	if sliceSize == 0 {
-		return 0
-	}
-
-	// Copy into a fixed-size, zero-padded buffer before reinterpreting. The
-	// previous implementation dereferenced *(*uint)(&bs[0]), which always reads
-	// sizeof(CK_ULONG) bytes and therefore read past the end of any slice
-	// shorter than that — an out-of-bounds read (undefined behaviour, and a
-	// potential crash at a page boundary or adjacent-memory disclosure). A
-	// PKCS#11 attribute such as a 4-byte CKA_PARAMETER_SET triggered exactly
-	// this. Copy clamps to the available bytes and zero-fills the rest.
-	var buf [C.sizeof_ulong]byte
-	copyLen := sliceSize
-	if copyLen > C.sizeof_ulong {
-		copyLen = C.sizeof_ulong
-	}
-	copy(buf[:], bs[:copyLen])
-	value := *(*uint)(unsafe.Pointer(&buf[0]))
-
-	if sliceSize >= C.sizeof_ulong {
-		return value
-	}
-
-	// Mask to the number of bits actually supplied by the (shorter) slice.
-	var mask uint
-	for i := 0; i < sliceSize; i++ {
-		mask |= 0xff << uint(i*8)
-	}
-	return value & mask
-}
-
-func concat(slices ...[]byte) []byte {
-	n := 0
-	for _, slice := range slices {
-		n += len(slice)
-	}
-	r := make([]byte, n)
-	n = 0
-	for _, slice := range slices {
-		n += copy(r[n:], slice)
-	}
-	return r
-}
+// CK_ULONG conversions live in the pkcs11-go binding, as pkcs11.ULongToBytes
+// and pkcs11.BytesToULong. Its width is a property of the C ABI — 8 bytes under
+// LP64, 4 under Windows' LLP64 model — so it belongs in the one package that
+// holds the PKCS#11 headers. Keeping a copy here meant importing "C" for a
+// single constant, and getting it wrong on Windows.
 
 // Representation of a *DSA signature
 type dsaSignature struct {

@@ -112,7 +112,7 @@ func (c *Context) getKeyPair(session *pkcs11Session, privHandle *pkcs11.ObjectHa
 	//}
 	id := attributes[0].Value
 	label := attributes[1].Value
-	keyType = bytesToUlong(attributes[2].Value)
+	keyType = pkcs11.BytesToULong(attributes[2].Value)
 	if len(id) == 0 && len(label) == 0 {
 		return nil, 0, nil, nil, nil, fmt.Errorf("key id or label cannot both be empty")
 	}
@@ -483,7 +483,7 @@ func (c *Context) FindKeysWithAttributes(attributes AttributeSet) ([]*SecretKey,
 			if attributes, err = session.ctx.GetAttributeValue(session.handle, privHandle, attributes); err != nil {
 				return err
 			}
-			keyType := bytesToUlong(attributes[0].Value)
+			keyType := pkcs11.BytesToULong(attributes[0].Value)
 
 			cipher, ok := Ciphers[int(keyType)]
 			if !ok {
@@ -520,7 +520,7 @@ func (c *Context) makePrivateKey(session *pkcs11Session, privHandle *pkcs11.Obje
 	if attributes, err = session.ctx.GetAttributeValue(session.handle, *privHandle, attributes); err != nil {
 		return nil, err
 	}
-	keyType := bytesToUlong(attributes[0].Value)
+	keyType := pkcs11.BytesToULong(attributes[0].Value)
 
 	resultPkcs11PrivateKey := pkcs11PrivateKey{
 		pkcs11Object: pkcs11Object{

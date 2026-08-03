@@ -168,7 +168,7 @@ func (c *Context) makeRSAPrivateKey(session *pkcs11Session, privHandle *pkcs11.O
 	if attributes, err = session.ctx.GetAttributeValue(session.handle, *privHandle, attributes); err != nil {
 		return nil, err
 	}
-	keyType := bytesToUlong(attributes[0].Value)
+	keyType := pkcs11.BytesToULong(attributes[0].Value)
 
 	resultPkcs11PrivateKey := pkcs11PrivateKey{
 		pkcs11Object: pkcs11Object{
@@ -183,7 +183,7 @@ func (c *Context) makeRSAPrivateKey(session *pkcs11Session, privHandle *pkcs11.O
 		return result, nil
 
 	default:
-		return nil, fmt.Errorf("not an RSA key type: %w", err)
+		return nil, fmt.Errorf("not an RSA key type: %X: %w", keyType, errUnsupportedKeyType)
 	}
 }
 
@@ -244,6 +244,7 @@ func (c *Context) FindRSAPrivateKeys(id []byte, label []byte) (pks []RSAPrivateK
 // FindRSAPrivateKeysWithAttributes retrieves previously created asymmetric RSA private keys,
 // or nil if none can be found.
 // The given attributes are matched against the private half only.
+// Private keys that are not RSA are skipped.
 // This method is specific to rsa only because it is the only supported type able to decrypt and
 // sign.
 func (c *Context) FindRSAPrivateKeysWithAttributes(attributes AttributeSet) (pks []RSAPrivateKey, err error) {
@@ -272,6 +273,9 @@ func (c *Context) FindRSAPrivateKeysWithAttributes(attributes AttributeSet) (pks
 
 		for _, privHandle := range privHandles {
 			k, err := c.makeRSAPrivateKey(session, &privHandle)
+			if errors.Is(err, errUnsupportedKeyType) {
+				continue
+			}
 			if err != nil {
 				return err
 			}
@@ -520,12 +524,10 @@ func signPSS(session *pkcs11Session, key *pkcs11PrivateKeyRSA, digest []byte, op
 	default:
 		sLen = uint(opts.SaltLength)
 	}
-	// TODO this is pretty horrible, maybe the PKCS#11 wrapper
-	// could be improved to help us out here
-	parameters := concat(ulongToBytes(hMech),
-		ulongToBytes(mgf),
-		ulongToBytes(sLen))
-	mech := pkcs11.NewMechanism(pkcs11.CKM_RSA_PKCS_PSS, parameters)
+	// The binding marshals CK_RSA_PKCS_PSS_PARAMS itself, so we no longer have
+	// to hand-pack three CK_ULONGs and hope the layout matches the token's.
+	mech := pkcs11.NewMechanismWithParams(pkcs11.CKM_RSA_PKCS_PSS,
+		pkcs11.NewPSSParams(hMech, mgf, int(sLen)))
 	if err = session.ctx.SignInit(session.handle, mech, key.handle); err != nil {
 		return nil, err
 	}

@@ -239,7 +239,7 @@ func (c *Context) makeMLKEMKeyPair(session *pkcs11Session, privHandle *pkcs11.Ob
 	}
 	id := attrs[0].Value
 	label := attrs[1].Value
-	paramSet := bytesToUlong(attrs[2].Value)
+	paramSet := pkcs11.BytesToULong(attrs[2].Value)
 
 	if len(id) == 0 && len(label) == 0 {
 		return nil, errNoCkaID

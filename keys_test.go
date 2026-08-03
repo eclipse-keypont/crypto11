@@ -194,7 +194,7 @@ func TestGettingPublicKeyAttributes(t *testing.T) {
 		require.NotNil(t, attrs)
 		require.Len(t, attrs, 1)
 
-		require.Equal(t, uint(rsaSize), bytesToUlong(attrs[CkaModulusBits].Value))
+		require.Equal(t, uint(rsaSize), pkcs11.BytesToULong(attrs[CkaModulusBits].Value))
 	})
 }
 
@@ -211,7 +211,7 @@ func TestGettingSecretKeyAttributes(t *testing.T) {
 		require.NotNil(t, attrs)
 		require.Len(t, attrs, 1)
 
-		require.Equal(t, uint(16), bytesToUlong(attrs[CkaValueLen].Value))
+		require.Equal(t, uint(16), pkcs11.BytesToULong(attrs[CkaValueLen].Value))
 	})
 }
 

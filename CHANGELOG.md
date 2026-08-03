@@ -54,12 +54,32 @@ A dedicated audit found and fixed 7 issues:
   [#103](https://github.com/eclipse-keypont/crypto11/pull/103) — thank you both for the long wait).
   A single unsupported object — an ML-KEM key pair generated with this release, say — used to make
   `FindAllKeyPairs`, `FindAllKeys`, `FindPrivateKeysWithAttributes`,
-  `FindKeyRSAPairsWithAttributes` and `FindAllPairedCertificates` fail outright with
-  `unsupported key type: %X`, hiding every other key on the token. Such objects are now skipped,
-  like keys with no CKA_ID or no public half.
+  `FindKeyRSAPairsWithAttributes`, `FindRSAPrivateKeysWithAttributes` and
+  `FindAllPairedCertificates` fail outright with `unsupported key type: %X`, hiding every other key
+  on the token. Such objects are now skipped, like keys with no CKA_ID or no public half.
+  `makeRSAPrivateKey`'s error for a non-RSA key also wrapped a nil error, rendering as
+  `not an RSA key type: %!w(<nil>)`; it now reports the key type it actually found.
+- **Windows**: `bytesToUlong` / `ulongToBytes` no longer assume a `CK_ULONG` is as wide as a Go
+  `uint` ([#103](https://github.com/eclipse-keypont/crypto11/pull/103), diagnosed in detail by
+  [@droppingin](https://github.com/droppingin) — including the SoftHSM2-for-Windows repro).
+  `CK_ULONG` is a C `unsigned long`: 4 bytes under Windows' LLP64 model, 8 under LP64, while Go's
+  `uint` is 8 everywhere. Reinterpreting the address of a 4-byte buffer as a `uint` read 4 bytes
+  past it, so on Windows every `CK_ULONG` attribute — `CKA_KEY_TYPE`, `CKA_MODULUS_BITS`,
+  `CKA_VALUE_LEN` — came back with garbage in its top half. Both conversions now come from the
+  binding as `cryptoki.ULongToBytes` / `cryptoki.BytesToULong` (pkcs11-go v1.1.0-rc1), which size
+  them from the C type itself: a short attribute is zero-extended, anything past one `CK_ULONG` is
+  ignored, and encoding a value too large for the platform's `CK_ULONG` panics rather than silently
+  truncating a mechanism parameter.
 
 ### Changed
 
+- **crypto11 no longer contains any cgo of its own.** The `CK_ULONG` conversions were the last
+  `import "C"` in the package; they now delegate to `cryptoki.ULongToBytes` / `cryptoki.BytesToULong`,
+  added in pkcs11-go v1.1.0-rc1 (which this release requires). The width of a `CK_ULONG` is a
+  property of the C ABI, so it belongs in the one package that holds the PKCS#11 headers — keeping a
+  second copy here is what let it drift out of step on Windows.
+- RSA-PSS signing uses the binding's typed `CK_RSA_PKCS_PSS_PARAMS` (`NewPSSParams`) instead of
+  hand-packing three `CK_ULONG`s, matching how OAEP and GCM parameters were already built.
 - Internal resource pool (`internal/pool`) reimplemented on native `sync/atomic` typed values,
   removing a hand-rolled 64-bit alignment footgun (relevant to ARM/Raspberry Pi targets).
 - Full `golangci-lint` cleanup: ineffassign, prealloc, unconvert, revive exported-comment/

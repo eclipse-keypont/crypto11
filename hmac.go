@@ -118,7 +118,7 @@ func (key *SecretKey) NewHMAC(mech int, length int) (hash.Hash, error) {
 		hi.blockSize = info.blockSize
 		if info.general {
 			hi.size = length
-			params = ulongToBytes(uint(length))
+			params = pkcs11.ULongToBytes(uint(length))
 		} else {
 			hi.size = info.size
 		}
