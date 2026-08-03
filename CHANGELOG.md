@@ -76,6 +76,16 @@ A dedicated audit found and fixed 7 issues:
   them from the C type itself: a short attribute is zero-extended, anything past one `CK_ULONG` is
   ignored, and encoding a value too large for the platform's `CK_ULONG` panics rather than silently
   truncating a mechanism parameter.
+- Certificates returned in a null-padded `CKA_VALUE` buffer now parse
+  ([#106](https://github.com/eclipse-keypont/crypto11/pull/106), reported by
+  [@donachan-tesla](https://github.com/donachan-tesla)). Some tokens return the attribute in a
+  fixed-size buffer, padded past the end of the certificate, and `x509.ParseCertificate` rejects
+  the trailing data — so `FindCertificate` and `FindAllPairedCertificates` failed on those tokens.
+  The certificate is now delimited by its own ASN.1 length instead. Note that trimming trailing
+  null bytes, as #106 proposed, is not equivalent: the last byte of the signature is effectively
+  random, so roughly one certificate in 256 legitimately ends in a null byte and would be
+  truncated — padded or not. Trailing bytes that are not null are still an error rather than
+  something to discard silently.
 
 ### Changed
 

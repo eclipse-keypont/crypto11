@@ -4,6 +4,8 @@
 package crypto11
 
 import (
+	"crypto/ecdsa"
+	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/x509"
@@ -218,4 +220,84 @@ func generateRandomCert(t *testing.T) *x509.Certificate {
 	require.NoError(t, err)
 
 	return cert
+}
+
+func TestParseCertificateValue(t *testing.T) {
+	plain := generateFastCertDER(t, false)
+	endsInNull := generateFastCertDER(t, true)
+
+	padding := make([]byte, 16)
+
+	tests := []struct {
+		name string
+		der  []byte
+	}{
+		{"plain", plain},
+		{"padded", append(append([]byte{}, plain...), padding...)},
+		// A certificate whose signature happens to end in a null byte must survive
+		// unpadded, and must not be truncated when the token pads it either.
+		{"ends in null byte", endsInNull},
+		{"ends in null byte, padded", append(append([]byte{}, endsInNull...), padding...)},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			cert, err := parseCertificateValue(test.der)
+			require.NoError(t, err)
+			require.NotNil(t, cert)
+			assert.Equal(t, "trim-test", cert.Subject.CommonName)
+		})
+	}
+}
+
+func TestParseCertificateValueRejectsGarbage(t *testing.T) {
+	der := generateFastCertDER(t, false)
+
+	// Trailing data that is not padding indicates a corrupt or misreported attribute.
+	_, err := parseCertificateValue(append(append([]byte{}, der...), 0x00, 0x01, 0x00))
+	require.Error(t, err)
+
+	// Leading null bytes are not padding either: the buffer no longer starts with the
+	// certificate, and must not be silently reinterpreted.
+	_, err = parseCertificateValue(append([]byte{0x00, 0x00}, der...))
+	require.Error(t, err)
+
+	_, err = parseCertificateValue(nil)
+	require.Error(t, err)
+
+	// A certificate truncated mid-way, then null-padded back to its original length,
+	// must not pass as valid.
+	truncated := make([]byte, len(der))
+	copy(truncated, der[:len(der)/2])
+	_, err = parseCertificateValue(truncated)
+	require.Error(t, err)
+}
+
+// generateFastCertDER returns the DER of a self-signed ECDSA certificate. When endsInNull is
+// set, certificates are generated until one whose last byte is zero turns up — the last byte
+// of the signature is effectively random, so this takes ~256 attempts.
+func generateFastCertDER(t *testing.T, endsInNull bool) []byte {
+	t.Helper()
+
+	template := &x509.Certificate{
+		SerialNumber: big.NewInt(1),
+		Subject:      pkix.Name{CommonName: "trim-test"},
+		NotBefore:    time.Now(),
+		NotAfter:     time.Now().Add(24 * time.Hour),
+	}
+
+	for i := 0; i < 10000; i++ {
+		key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+		require.NoError(t, err)
+
+		der, err := x509.CreateCertificate(rand.Reader, template, template, &key.PublicKey, key)
+		require.NoError(t, err)
+
+		if !endsInNull || der[len(der)-1] == 0x00 {
+			return der
+		}
+	}
+
+	t.Fatal("no certificate ending in a null byte was generated")
+	return nil
 }

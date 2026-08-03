@@ -23,13 +23,38 @@ func findCertificate(session *pkcs11Session, id []byte, label []byte, serial *bi
 	}
 
 	if rawCertificate != nil {
-		cert, err = x509.ParseCertificate(rawCertificate)
+		cert, err = parseCertificateValue(rawCertificate)
 		if err != nil {
 			return nil, err
 		}
 	}
 
 	return cert, err
+}
+
+// parseCertificateValue parses the DER certificate held in a CKA_VALUE attribute.
+//
+// Some tokens return CKA_VALUE in a fixed-size buffer, null-padded past the end of the
+// certificate, which x509.ParseCertificate rejects as trailing data. The certificate is
+// therefore delimited by its own ASN.1 length rather than by trimming null bytes: a
+// certificate whose last byte is legitimately zero — roughly one in 256, the final byte of
+// the signature being effectively random — would otherwise be truncated. Anything left over
+// must be padding; a non-zero byte past the certificate means the attribute is not what it
+// claims to be, and is reported instead of ignored.
+func parseCertificateValue(rawCertificate []byte) (*x509.Certificate, error) {
+	var der asn1.RawValue
+	rest, err := asn1.Unmarshal(rawCertificate, &der)
+	if err != nil {
+		return nil, errors.WithMessage(err, "failed to decode certificate DER")
+	}
+
+	for _, b := range rest {
+		if b != 0 {
+			return nil, errors.Errorf("%d bytes of non-null trailing data after certificate", len(rest))
+		}
+	}
+
+	return x509.ParseCertificate(der.FullBytes)
 }
 
 func findRawCertificate(session *pkcs11Session, id []byte, label []byte, serial *big.Int) (rawCertificate []byte, err error) {
