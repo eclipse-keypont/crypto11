@@ -56,6 +56,9 @@
 // a default maximum is used (see DefaultMaxSessions). In every case the maximum
 // supported sessions as reported by the token is obeyed.
 //
+// Context.PoolStats reports how the pool is coping, for metrics and for sizing
+// the two values above.
+//
 // # Limitations
 //
 // The PKCS1v15DecryptOptions SessionKeyLen field is not implemented

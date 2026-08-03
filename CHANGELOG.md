@@ -23,6 +23,12 @@ was replaced, the config file was renamed, and the API surface was hardened afte
   (`mlkem.go`).
 - `MLKEMDeriveKey`, a KMAC-based key derivation helper for turning ML-KEM shared secrets into
   usable keys.
+- `Context.PoolStats`, returning session pool counters — capacity, available, active, in use,
+  wait count and wait time — for metrics and diagnostics
+  ([#119](https://github.com/eclipse-keypont/crypto11/issues/119), requested by
+  [@eriklupander](https://github.com/eriklupander)). It reads in-memory counters only: no PKCS#11
+  call, no session taken, safe to call concurrently or on a closed `Context`. The returned
+  `PoolStats` is a plain struct, so the vendored `internal/pool` types stay out of the public API.
 - `make release VERSION=x.y.z` target: tags, signs, and pushes a release, triggering a
   SLSA3-attested build.
 - `make sbom` target: generates a CycloneDX 1.6 SBOM with the same flags CI uses, so the published SBOM
