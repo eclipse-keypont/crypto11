@@ -23,9 +23,9 @@ var errMalformedRSAPublicKey = errors.New("malformed RSA public key")
 
 // errUnsupportedRSAOptions is returned when an unsupported RSA option is requested.
 //
-// Currently this means a nontrivial SessionKeyLen when decrypting; or
-// an unsupported hash function; or crypto.rsa.PSSSaltLengthAuto was
-// requested.
+// Currently this means a nontrivial SessionKeyLen when decrypting; an
+// unsupported hash function; or crypto.rsa.PSSSaltLengthAuto requested
+// for a key whose public half is not an RSA public key.
 var errUnsupportedRSAOptions = errors.New("unsupported RSA option value")
 
 // pkcs11PrivateKeyRSA contains a reference to a loaded PKCS#11 RSA private key object.
@@ -507,6 +507,21 @@ func hashToPKCS11(hashFunction crypto.Hash) (hashAlg uint, mgfAlg uint, hashLen 
 	}
 }
 
+// maxPSSSaltLength resolves rsa.PSSSaltLengthAuto to the largest salt the
+// modulus can carry, the same value crypto/rsa picks: emLen - hLen - 2, with
+// emLen derived from the bit length of the modulus.
+func maxPSSSaltLength(pubKey crypto.PublicKey, hLen uint) (uint, error) {
+	pub, ok := pubKey.(*rsa.PublicKey)
+	if !ok {
+		return 0, errUnsupportedRSAOptions
+	}
+	sLen := (pub.N.BitLen()-1+7)/8 - 2 - int(hLen)
+	if sLen < 0 {
+		return 0, rsa.ErrMessageTooLong
+	}
+	return uint(sLen), nil
+}
+
 func signPSS(session *pkcs11Session, key *pkcs11PrivateKeyRSA, digest []byte, opts *rsa.PSSOptions) ([]byte, error) {
 	var hMech, mgf, hLen, sLen uint
 	var err error
@@ -514,11 +529,10 @@ func signPSS(session *pkcs11Session, key *pkcs11PrivateKeyRSA, digest []byte, op
 		return nil, err
 	}
 	switch opts.SaltLength {
-	case rsa.PSSSaltLengthAuto: // parseltongue constant
-		// TODO we could (in principle) work out the biggest
-		// possible size from the key, but until someone has
-		// the effort to do that...
-		return nil, errUnsupportedRSAOptions
+	case rsa.PSSSaltLengthAuto:
+		if sLen, err = maxPSSSaltLength(key.pubKey, hLen); err != nil {
+			return nil, err
+		}
 	case rsa.PSSSaltLengthEqualsHash:
 		sLen = hLen
 	default:
@@ -562,11 +576,11 @@ func signPKCS1v15(session *pkcs11Session, key *pkcs11PrivateKeyRSA, digest []byt
 //
 // PKCS#11 expects to pick its own random data where necessary for signatures, so the rand argument is ignored.
 //
-// Note that (at present) the crypto.rsa.PSSSaltLengthAuto option is
-// not supported. The caller must either use
-// crypto.rsa.PSSSaltLengthEqualsHash (recommended) or pass an
-// explicit salt length. Moreover the underlying PKCS#11
-// implementation may impose further restrictions.
+// For PSS signatures, crypto.rsa.PSSSaltLengthAuto is resolved to the
+// largest salt the modulus can carry, as crypto/rsa does; callers may
+// also use crypto.rsa.PSSSaltLengthEqualsHash or an explicit salt
+// length. Note that the underlying PKCS#11 implementation may impose
+// further restrictions on the salt length it accepts.
 func (priv *pkcs11PrivateKeyRSA) Sign(_ io.Reader, digest []byte, opts crypto.SignerOpts) (signature []byte, err error) {
 	err = priv.context.withSession(func(session *pkcs11Session) error {
 		switch opts := opts.(type) {

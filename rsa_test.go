@@ -11,6 +11,7 @@ import (
 	_ "crypto/sha1"
 	_ "crypto/sha256"
 	_ "crypto/sha512"
+	"math/big"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -123,7 +124,6 @@ func testRsaSigningPKCS1v15(t *testing.T, key crypto.Signer, hashFunction crypto
 }
 
 func testRsaSigningPSS(t *testing.T, key crypto.Signer, hashFunction crypto.Hash, native bool) {
-
 	if !native {
 		skipIfMechUnsupported(t, key.(*pkcs11PrivateKeyRSA).context, pkcs11.CKM_RSA_PKCS_PSS)
 	}
@@ -133,18 +133,84 @@ func testRsaSigningPSS(t *testing.T, key crypto.Signer, hashFunction crypto.Hash
 	_, err := h.Write(plaintext)
 	require.NoError(t, err)
 
-	plaintextHash := h.Sum([]byte{}) // weird API
-	pssOptions := &rsa.PSSOptions{
-		SaltLength: rsa.PSSSaltLengthEqualsHash,
-		Hash:       hashFunction,
-	}
-	sig, err := key.Sign(rand.Reader, plaintextHash, pssOptions)
-	require.NoError(t, err)
-
+	plaintextHash := h.Sum(nil)
 	rsaPubkey := key.Public().(*rsa.PublicKey)
 
-	err = rsa.VerifyPSS(rsaPubkey, hashFunction, plaintextHash, sig, pssOptions)
-	require.NoError(t, err)
+	saltLengths := map[string]int{
+		"Auto":       rsa.PSSSaltLengthAuto,
+		"EqualsHash": rsa.PSSSaltLengthEqualsHash,
+	}
+
+	for name, saltLength := range saltLengths {
+		t.Run(name, func(t *testing.T) {
+			pssOptions := &rsa.PSSOptions{
+				SaltLength: saltLength,
+				Hash:       hashFunction,
+			}
+			sig, err := key.Sign(rand.Reader, plaintextHash, pssOptions)
+			require.NoError(t, err)
+
+			err = rsa.VerifyPSS(rsaPubkey, hashFunction, plaintextHash, sig, pssOptions)
+			require.NoError(t, err)
+		})
+	}
+}
+
+// TestMaxPSSSaltLength checks that rsa.PSSSaltLengthAuto resolves to the same
+// salt length crypto/rsa would choose, without needing a token that supports
+// CKM_RSA_PKCS_PSS.
+func TestMaxPSSSaltLength(t *testing.T) {
+	for _, bits := range []int{1024, 2048, 3072, 4096} {
+		// Generating a 4096-bit key dominates the runtime of this test and
+		// its cost varies a lot from run to run.
+		if bits > 3072 && testing.Short() {
+			continue
+		}
+
+		key, err := rsa.GenerateKey(rand.Reader, bits)
+		require.NoError(t, err)
+
+		for _, hashFunction := range []crypto.Hash{crypto.SHA1, crypto.SHA224, crypto.SHA256, crypto.SHA384, crypto.SHA512} {
+			_, _, hLen, err := hashToPKCS11(hashFunction)
+			require.NoError(t, err)
+
+			sLen, err := maxPSSSaltLength(&key.PublicKey, hLen)
+			require.NoError(t, err)
+
+			// The same expression crypto/rsa uses for PSSSaltLengthAuto.
+			want := (bits-1+7)/8 - 2 - hashFunction.Size()
+			require.Equal(t, uint(want), sLen)
+
+			// A signature made with that salt must verify as Auto.
+			h := hashFunction.New()
+			_, err = h.Write([]byte("sign me with PSS"))
+			require.NoError(t, err)
+			digest := h.Sum(nil)
+
+			sig, err := rsa.SignPSS(rand.Reader, key, hashFunction, digest, &rsa.PSSOptions{
+				SaltLength: int(sLen),
+				Hash:       hashFunction,
+			})
+			require.NoError(t, err)
+
+			err = rsa.VerifyPSS(&key.PublicKey, hashFunction, digest, sig, &rsa.PSSOptions{
+				SaltLength: rsa.PSSSaltLengthAuto,
+				Hash:       hashFunction,
+			})
+			require.NoError(t, err)
+		}
+	}
+
+	t.Run("NonRSAPublicKey", func(t *testing.T) {
+		_, err := maxPSSSaltLength(struct{}{}, 32)
+		require.ErrorIs(t, err, errUnsupportedRSAOptions)
+	})
+
+	t.Run("ModulusTooSmall", func(t *testing.T) {
+		pub := &rsa.PublicKey{N: big.NewInt(65537), E: 65537} // 17-bit modulus
+		_, err := maxPSSSaltLength(pub, 64)
+		require.ErrorIs(t, err, rsa.ErrMessageTooLong)
+	})
 }
 
 func testRsaEncryption(t *testing.T, key crypto.Decrypter, native bool) {
