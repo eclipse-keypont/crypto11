@@ -7,6 +7,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/asn1"
+	"fmt"
 	"math/big"
 
 	pkcs11 "github.com/eclipse-keypont/pkcs11-go/cryptoki"
@@ -127,6 +128,90 @@ func (c *Context) FindCertificate(id []byte, label []byte, serial *big.Int) (*x5
 	})
 
 	return cert, err
+}
+
+// FindAllCertificates retrieves every X.509 certificate on the token, or a nil slice if there
+// are none. It is the unfiltered counterpart of FindCertificate, for callers that know nothing
+// about what the token holds.
+//
+// Only objects whose CKA_CERTIFICATE_TYPE is CKC_X_509 are returned; certificate objects of
+// another type (WTLS or attribute certificates) are not X.509 certificates and are left to the
+// token rather than reported as an error. An object that claims to be X.509 but whose CKA_VALUE
+// does not parse is reported, since that is corruption rather than a kind of certificate this
+// package cannot represent.
+//
+// Certificates are not matched against private keys. Use FindAllPairedCertificates for the
+// certificates this token can also sign with.
+//
+// The certificates are returned as stored. Being on the token is not a statement of trust —
+// anyone able to write to it can add a certificate — so a caller building a trust store or
+// verifying a chain must still validate them.
+func (c *Context) FindAllCertificates() (certificates []*x509.Certificate, err error) {
+	if c.closed.Get() {
+		return nil, errClosed
+	}
+
+	err = c.withSession(func(session *pkcs11Session) error {
+		template := []*pkcs11.Attribute{
+			pkcs11.NewAttribute(pkcs11.CKA_CLASS, pkcs11.CKO_CERTIFICATE),
+			pkcs11.NewAttribute(pkcs11.CKA_CERTIFICATE_TYPE, pkcs11.CKC_X_509),
+		}
+
+		// findKeysWithAttributes is not key-specific: it pages C_FindObjects over whatever
+		// class the template names. Certificates go through it as well, so that getting the
+		// batching right — C_FindObjects returns no more handles than it is asked for — is
+		// done in one place rather than two.
+		handles, err := findKeysWithAttributes(session, template)
+		if err != nil {
+			return err
+		}
+
+		for _, handle := range handles {
+			attributes := []*pkcs11.Attribute{
+				pkcs11.NewAttribute(pkcs11.CKA_VALUE, 0),
+			}
+			if attributes, err = session.ctx.GetAttributeValue(session.handle, handle, attributes); err != nil {
+				return err
+			}
+
+			certificate, err := parseCertificateValue(attributes[0].Value)
+			if err != nil {
+				return errors.WithMessage(err, describeCertificateObject(session, handle))
+			}
+
+			certificates = append(certificates, certificate)
+		}
+
+		return nil
+	})
+
+	if err != nil {
+		return nil, err
+	}
+
+	return certificates, nil
+}
+
+// describeCertificateObject names a certificate object by its CKA_ID and CKA_LABEL, so that an
+// error raised while enumerating a token full of certificates says which one is at fault. It is
+// best effort: a token that will not report those attributes still gets an error, just a vaguer
+// one. The label is quoted rather than interpolated raw, since it is arbitrary bytes chosen by
+// whoever wrote the object.
+func describeCertificateObject(session *pkcs11Session, handle pkcs11.ObjectHandle) string {
+	template := []*pkcs11.Attribute{
+		pkcs11.NewAttribute(pkcs11.CKA_ID, nil),
+		pkcs11.NewAttribute(pkcs11.CKA_LABEL, nil),
+	}
+
+	// The error is deliberately dropped: a hard failure comes back with no attributes, while
+	// an attribute the token declines to report comes back empty alongside the ones it did
+	// read, which is still enough to name the object. Either way the caller's error stands.
+	attributes, _ := session.ctx.GetAttributeValue(session.handle, handle, template)
+	if len(attributes) < len(template) {
+		return "certificate object"
+	}
+
+	return fmt.Sprintf("certificate with id=%x and label=%q", attributes[0].Value, attributes[1].Value)
 }
 
 // FindAllPairedCertificates finds all certificates on the token that have a matching private key.

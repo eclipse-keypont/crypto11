@@ -37,6 +37,15 @@ was replaced, the config file was renamed, and the API surface was hardened afte
   ([#112](https://github.com/eclipse-keypont/crypto11/issues/112)). The generic `FindKeyPair` family
   still returns `Signer` — its signatures are unchanged — and now documents where to go for a
   decrypter, as do `Signer` and `SignerDecrypter` themselves.
+- `FindAllCertificates`, returning every X.509 certificate on the token
+  ([#71](https://github.com/eclipse-keypont/crypto11/pull/71), contributed by
+  [@mekpavit](https://github.com/mekpavit)). `FindCertificate` needs an id, label or serial, and
+  `FindAllPairedCertificates` only returns certificates that have a matching private key, so a
+  caller that knows nothing about the token had no way to list what is on it. Enumeration pages
+  through `C_FindObjects` rather than taking a single batch — the original patch stopped at 20
+  certificates — restricts itself to `CKC_X_509` objects so a WTLS or attribute certificate is
+  skipped instead of failing the call, and shares `FindCertificate`'s null-padding-tolerant DER
+  parsing.
 - `make release VERSION=x.y.z` target: tags, signs, and pushes a release, triggering a
   SLSA3-attested build.
 - `make sbom` target: generates a CycloneDX 1.6 SBOM with the same flags CI uses, so the published SBOM

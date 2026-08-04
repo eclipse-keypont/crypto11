@@ -193,6 +193,69 @@ func TestDeleteCertificate(t *testing.T) {
 	require.Nil(t, cert)
 }
 
+// requireCertificatesFound checks that every wanted certificate appears in got, matching on the
+// full DER rather than on an identifier, so the finder is shown to return the right bytes and not
+// merely the right number of objects. The token may already hold certificates the test did not
+// import, so the assertion is containment rather than an exact count — the counterpart of
+// requireKeysFound in keys_test.go, which cannot be reused here because it indexes by CKA_ID
+// through Context.GetAttribute, and an x509.Certificate is not a PKCS#11 key.
+func requireCertificatesFound(t *testing.T, got, want []*x509.Certificate, msg string) {
+	t.Helper()
+
+	require.GreaterOrEqual(t, len(got), len(want), msg)
+
+	found := make(map[string]bool, len(got))
+	for _, cert := range got {
+		found[string(cert.Raw)] = true
+	}
+
+	for _, cert := range want {
+		assert.True(t, found[string(cert.Raw)],
+			"%s: omitted the certificate with serial %d", msg, cert.SerialNumber)
+	}
+}
+
+func TestFindAllCertificates(t *testing.T) {
+	skipTest(t, skipTestCert)
+
+	tests := []struct {
+		name  string
+		count int
+	}{
+		{"a few certificates", 3},
+		// C_FindObjects returns no more handles than it is asked for, so enumerating in a
+		// single call silently truncates the result at maxHandlePerFind.
+		{"more than one batch", maxHandlePerFind + 1},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			withContext(t, func(ctx *Context) {
+				want := make([]*x509.Certificate, 0, test.count)
+
+				for i := 0; i < test.count; i++ {
+					id := randomBytes()
+					cert := generateFastCert(t, int64(i))
+
+					require.NoError(t, ctx.ImportCertificate(id, cert))
+					// Delete only what this test imported: the token is not
+					// assumed to be ours to clear.
+					defer func() {
+						require.NoError(t, ctx.DeleteCertificate(id, nil, nil))
+					}()
+
+					want = append(want, cert)
+				}
+
+				got, err := ctx.FindAllCertificates()
+				require.NoError(t, err)
+
+				requireCertificatesFound(t, got, want, "FindAllCertificates")
+			})
+		})
+	}
+}
+
 func generateRandomCert(t *testing.T) *x509.Certificate {
 	serial, err := rand.Int(rand.Reader, big.NewInt(20000))
 	require.NoError(t, err)
@@ -271,6 +334,32 @@ func TestParseCertificateValueRejectsGarbage(t *testing.T) {
 	copy(truncated, der[:len(der)/2])
 	_, err = parseCertificateValue(truncated)
 	require.Error(t, err)
+}
+
+// generateFastCert returns a self-signed ECDSA certificate with the given serial number. Tests
+// that import more than a handful of certificates use this rather than generateRandomCert:
+// nothing in them depends on the certificate being RSA, and an RSA-4096 key takes seconds to
+// generate where a P-256 key takes microseconds.
+func generateFastCert(t *testing.T, serial int64) *x509.Certificate {
+	t.Helper()
+
+	template := &x509.Certificate{
+		SerialNumber: big.NewInt(serial),
+		Subject:      pkix.Name{CommonName: "find-all-test"},
+		NotBefore:    time.Now(),
+		NotAfter:     time.Now().Add(24 * time.Hour),
+	}
+
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	require.NoError(t, err)
+
+	der, err := x509.CreateCertificate(rand.Reader, template, template, &key.PublicKey, key)
+	require.NoError(t, err)
+
+	cert, err := x509.ParseCertificate(der)
+	require.NoError(t, err)
+
+	return cert
 }
 
 // generateFastCertDER returns the DER of a self-signed ECDSA certificate. When endsInNull is
