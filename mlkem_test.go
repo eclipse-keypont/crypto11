@@ -137,9 +137,13 @@ func testMLKEMOtherFindersStillWork(t *testing.T, ctx *Context) {
 	require.NoError(t, err, "an ML-KEM private key must not abort private key enumeration")
 	assert.NotEmpty(t, privKeys)
 
-	rsaPairs, err := ctx.FindKeyRSAPairsWithAttributes(NewAttributeSet())
+	rsaPairs, err := ctx.FindRSAKeyPairsWithAttributes(NewAttributeSet())
 	require.NoError(t, err, "an ML-KEM key pair must not abort RSA key pair enumeration")
 	assert.NotEmpty(t, rsaPairs)
+
+	allRSAPairs, err := ctx.FindAllRSAKeyPairs()
+	require.NoError(t, err, "an ML-KEM key pair must not abort FindAllRSAKeyPairs")
+	assert.NotEmpty(t, allRSAPairs)
 }
 
 func testMLKEMDelete(t *testing.T, ctx *Context) {

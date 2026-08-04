@@ -230,6 +230,9 @@ func (c *Context) makeKeyPair(session *pkcs11Session, privHandle *pkcs11.ObjectH
 // Only private keys that have a non-empty CKA_ID will be found, as this is required to locate the matching public key.
 // If the private key is found, but the public key with a corresponding CKA_ID is not, the key is not returned
 // because we cannot implement crypto.Signer without the public key.
+//
+// The returned Signer can only sign. To decrypt with an existing key pair, use FindRSAKeyPair,
+// which returns a SignerDecrypter.
 func (c *Context) FindKeyPair(id []byte, label []byte) (Signer, error) {
 	if c.closed.Get() {
 		return nil, errClosed
@@ -253,6 +256,9 @@ func (c *Context) FindKeyPair(id []byte, label []byte) (Signer, error) {
 // Only private keys that have a non-empty CKA_ID will be found, as this is required to locate the matching public key.
 // If the private key is found, but the public key with a corresponding CKA_ID is not, the key is not returned
 // because we cannot implement crypto.Signer without the public key.
+//
+// The returned Signers can only sign. To decrypt with existing key pairs, use FindRSAKeyPairs,
+// which returns SignerDecrypters.
 func (c *Context) FindKeyPairs(id []byte, label []byte) (signer []Signer, err error) {
 	if c.closed.Get() {
 		return nil, errClosed
@@ -312,6 +318,9 @@ func (c *Context) FindKeyPairWithAttributes(attributes AttributeSet) (Signer, er
 // If the private key is found, but the public key with a corresponding CKA_ID is not, the key is not returned
 // because we cannot implement crypto.Signer without the public key.
 // Keys whose type this package cannot represent as a Signer (ML-KEM key pairs, for example) are skipped.
+//
+// The returned Signers can only sign. To decrypt with existing key pairs, use
+// FindRSAKeyPairsWithAttributes, which returns SignerDecrypters.
 func (c *Context) FindKeyPairsWithAttributes(attributes AttributeSet) (signer []Signer, err error) {
 	if c.closed.Get() {
 		return nil, errClosed
@@ -365,6 +374,9 @@ func (c *Context) FindKeyPairsWithAttributes(attributes AttributeSet) (signer []
 // If a private key is found, but the corresponding public key is not, the key is not returned because we cannot
 // implement crypto.Signer without the public key.
 // Keys whose type this package cannot represent as a Signer (ML-KEM key pairs, for example) are skipped.
+//
+// The returned Signers can only sign. For every key pair on the token that can also decrypt, use
+// FindAllRSAKeyPairs, which returns SignerDecrypters.
 func (c *Context) FindAllKeyPairs() ([]Signer, error) {
 	if c.closed.Get() {
 		return nil, errClosed

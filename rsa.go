@@ -350,7 +350,7 @@ func (c *Context) FindRSAKeyPair(id []byte, label []byte) (SignerDecrypter, erro
 // Only private keys that have a non-empty CKA_ID will be found, as this is required to locate the
 // matching public key.
 // If the private key is found, but the public key with a corresponding CKA_ID is not, the key is
-// not returned because we cannot implement crypto.Signer of SignerDecrypter without the public key.
+// not returned because we cannot implement crypto.Signer or SignerDecrypter without the public key.
 func (c *Context) FindRSAKeyPairs(id []byte, label []byte) (signer []SignerDecrypter, err error) {
 	if c.closed.Get() {
 		return nil, errClosed
@@ -375,19 +375,19 @@ func (c *Context) FindRSAKeyPairs(id []byte, label []byte) (signer []SignerDecry
 		}
 	}
 
-	return c.FindKeyRSAPairsWithAttributes(attributes)
+	return c.FindRSAKeyPairsWithAttributes(attributes)
 }
 
-// FindKeyRSAPairsWithAttributes retrieves previously created RSA asymmetric key pairs, or nil if
+// FindRSAKeyPairsWithAttributes retrieves previously created RSA asymmetric key pairs, or nil if
 // none can be found.
 // The given attributes are matched against the private half only. Then the public half with a
 // matching CKA_ID and CKA_LABEL values is found.
 // Only private keys that have a non-empty CKA_ID will be found, as this is required to locate the
 // matching public key.
 // If the private key is found, but the public key with a corresponding CKA_ID is not, the key is
-// not returned because we cannot implement crypto.Signer of SignerDecrypter without the public key.
+// not returned because we cannot implement crypto.Signer or SignerDecrypter without the public key.
 // Private keys that are not RSA are skipped.
-func (c *Context) FindKeyRSAPairsWithAttributes(attributes AttributeSet) (signer []SignerDecrypter, err error) {
+func (c *Context) FindRSAKeyPairsWithAttributes(attributes AttributeSet) (signer []SignerDecrypter, err error) {
 	if c.closed.Get() {
 		return nil, errClosed
 	}
@@ -433,6 +433,24 @@ func (c *Context) FindKeyRSAPairsWithAttributes(attributes AttributeSet) (signer
 	}
 
 	return keys, nil
+}
+
+// FindAllRSAKeyPairs retrieves all existing RSA asymmetric key pairs, or a nil slice if none can be
+// found. It is the decryption-capable counterpart of FindAllKeyPairs: every returned key is a
+// SignerDecrypter, so this is the one-call form of "give me everything on this token I can decrypt
+// with".
+//
+// Only private keys that have a non-empty CKA_ID will be found, as this is required to locate the
+// matching public key.
+// If the private key is found, but the public key with a corresponding CKA_ID is not, the key is
+// not returned because we cannot implement crypto.Signer or SignerDecrypter without the public key.
+// Private keys that are not RSA are skipped.
+func (c *Context) FindAllRSAKeyPairs() ([]SignerDecrypter, error) {
+	if c.closed.Get() {
+		return nil, errClosed
+	}
+
+	return c.FindRSAKeyPairsWithAttributes(NewAttributeSet())
 }
 
 // Decrypt decrypts a message using a RSA key.

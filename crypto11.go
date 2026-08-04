@@ -184,6 +184,10 @@ type Context struct {
 }
 
 // Signer is a PKCS#11 key that implements crypto.Signer.
+//
+// A Signer can only sign. To also decrypt with an existing key pair, use SignerDecrypter and the
+// FindRSAKeyPair, FindRSAKeyPairs, FindRSAKeyPairsWithAttributes and FindAllRSAKeyPairs finders:
+// RSA is the only supported key type that can both sign and decrypt.
 type Signer interface {
 	crypto.Signer
 
@@ -192,6 +196,9 @@ type Signer interface {
 }
 
 // SignerDecrypter is a PKCS#11 key implements crypto.Signer and crypto.Decrypter.
+//
+// Use the FindRSAKeyPair, FindRSAKeyPairs, FindRSAKeyPairsWithAttributes and FindAllRSAKeyPairs
+// finders to obtain one; the generic FindKeyPair family returns a Signer, which cannot decrypt.
 type SignerDecrypter interface {
 	Signer
 

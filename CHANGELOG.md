@@ -14,6 +14,9 @@ was replaced, the config file was renamed, and the API surface was hardened afte
   is in. This changes the concrete type behind the public `Attribute` alias.
 - Module path is now `github.com/eclipse-keypont/crypto11/v2`.
 - The configuration file was renamed to `crypto11.config.json`.
+- `FindKeyRSAPairsWithAttributes` is renamed to `FindRSAKeyPairsWithAttributes`, matching every
+  other `FindRSA*` finder. The old spelling was the odd one out and made the RSA finders hard to
+  find; v2 is the only chance to fix it.
 
 ### Added
 
@@ -29,6 +32,11 @@ was replaced, the config file was renamed, and the API surface was hardened afte
   [@eriklupander](https://github.com/eriklupander)). It reads in-memory counters only: no PKCS#11
   call, no session taken, safe to call concurrently or on a closed `Context`. The returned
   `PoolStats` is a plain struct, so the vendored `internal/pool` types stay out of the public API.
+- `FindAllRSAKeyPairs`, the decryption-capable counterpart of `FindAllKeyPairs`: one call for every
+  key pair on the token that can decrypt, returned as `SignerDecrypter`
+  ([#112](https://github.com/eclipse-keypont/crypto11/issues/112)). The generic `FindKeyPair` family
+  still returns `Signer` — its signatures are unchanged — and now documents where to go for a
+  decrypter, as do `Signer` and `SignerDecrypter` themselves.
 - `make release VERSION=x.y.z` target: tags, signs, and pushes a release, triggering a
   SLSA3-attested build.
 - `make sbom` target: generates a CycloneDX 1.6 SBOM with the same flags CI uses, so the published SBOM
@@ -60,7 +68,7 @@ A dedicated audit found and fixed 7 issues:
   [#103](https://github.com/eclipse-keypont/crypto11/pull/103) — thank you both for the long wait).
   A single unsupported object — an ML-KEM key pair generated with this release, say — used to make
   `FindAllKeyPairs`, `FindAllKeys`, `FindPrivateKeysWithAttributes`,
-  `FindKeyRSAPairsWithAttributes`, `FindRSAPrivateKeysWithAttributes` and
+  `FindRSAKeyPairsWithAttributes`, `FindRSAPrivateKeysWithAttributes` and
   `FindAllPairedCertificates` fail outright with `unsupported key type: %X`, hiding every other key
   on the token. Such objects are now skipped, like keys with no CKA_ID or no public half.
   `makeRSAPrivateKey`'s error for a non-RSA key also wrapped a nil error, rendering as
