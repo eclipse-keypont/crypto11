@@ -4,6 +4,7 @@
 package crypto11
 
 import (
+	"bytes"
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/asn1"
@@ -130,6 +131,145 @@ func (c *Context) FindCertificate(id []byte, label []byte, serial *big.Int) (*x5
 	return cert, err
 }
 
+// FindCertificateChain retrieves a previously imported certificate together with the issuers
+// above it that the token also holds, leaf first. The leaf is located exactly as FindCertificate
+// locates it — any combination of id, label and serial, an error if all three are nil — and a nil
+// slice is returned if it is not on the token.
+//
+// Each subsequent certificate is the issuer of the one before it. Candidates are matched on
+// CKA_SUBJECT against the previous certificate's issuer name, falling back to a scan for a subject
+// key identifier equal to its authority key identifier when no subject matches. Names alone do not
+// decide it: a candidate is accepted only once it is shown to have signed the certificate below
+// it, so a token holding two CAs with the same distinguished name — a renewed or cross-signed CA,
+// which is not unusual — yields the one the chain was really built with rather than whichever the
+// token happened to return first.
+//
+// The chain ends at the first self-issued certificate. It is returned short rather than as an
+// error when the next issuer is not on the token: a root kept in the caller's system trust store
+// instead of on the HSM is the ordinary arrangement, not a failure. A short chain therefore means
+// either that the issuer is absent or that nothing on the token signed the last certificate.
+//
+// Verifying each link is not verifying the chain. Expiry, name constraints, key usage and trust
+// are not checked, and being on the token is not a statement of trust — anyone able to write to it
+// can add a certificate. A caller must still validate the result, typically with
+// x509.Certificate.Verify.
+func (c *Context) FindCertificateChain(id []byte, label []byte, serial *big.Int) (chain []*x509.Certificate, err error) {
+	if c.closed.Get() {
+		return nil, errClosed
+	}
+
+	err = c.withSession(func(session *pkcs11Session) error {
+		leaf, err := findCertificate(session, id, label, serial)
+		if err != nil {
+			return err
+		}
+		if leaf == nil {
+			return nil
+		}
+
+		chain, err = findIssuerChain(session, leaf)
+		return err
+	})
+
+	if err != nil {
+		return nil, err
+	}
+
+	return chain, nil
+}
+
+// findIssuerChain walks from leaf up through the issuers held on the token, stopping at a
+// self-issued certificate or at the first issuer it cannot find.
+//
+// The walk is iterative and keeps every certificate it has already placed, so that a cycle — two
+// CAs cross-signing each other, say — terminates instead of running until the stack is exhausted.
+// Token contents are not necessarily under the caller's control: anything that can write to the
+// token decides how long this runs.
+func findIssuerChain(session *pkcs11Session, leaf *x509.Certificate) ([]*x509.Certificate, error) {
+	chain := []*x509.Certificate{leaf}
+	placed := map[string]bool{string(leaf.Raw): true}
+
+	for {
+		current := chain[len(chain)-1]
+
+		// A self-issued certificate is the top of the chain: following its issuer name would
+		// only lead back to itself.
+		if len(current.RawIssuer) == 0 || bytes.Equal(current.RawIssuer, current.RawSubject) {
+			return chain, nil
+		}
+
+		issuer, err := findIssuer(session, current, placed)
+		if err != nil {
+			return nil, err
+		}
+		if issuer == nil {
+			return chain, nil
+		}
+
+		chain = append(chain, issuer)
+		placed[string(issuer.Raw)] = true
+	}
+}
+
+// findIssuer returns the certificate on the token that signed cert, or nil if there is none.
+// Certificates already placed in the chain are not considered again.
+//
+// The subject search is what the token can answer directly. The authority key identifier scan
+// behind it costs a read of every certificate on the token, so it is a fallback rather than the
+// first move, and is skipped entirely when cert names no authority key identifier — an empty one
+// would otherwise match every certificate that has no subject key identifier.
+func findIssuer(session *pkcs11Session, cert *x509.Certificate, placed map[string]bool) (*x509.Certificate, error) {
+	candidates, err := findX509Certificates(session, []*pkcs11.Attribute{
+		pkcs11.NewAttribute(pkcs11.CKA_SUBJECT, cert.RawIssuer),
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	if issuer := selectIssuer(cert, candidates, placed); issuer != nil {
+		return issuer, nil
+	}
+
+	if len(cert.AuthorityKeyId) == 0 {
+		return nil, nil
+	}
+
+	// Not every token indexes CKA_SUBJECT usefully, and a certificate can be imported with a
+	// subject attribute that does not match the DER it holds, so the identifiers carried inside
+	// the certificates get a second chance at the link.
+	all, err := findX509Certificates(session, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	var byKeyID []*x509.Certificate
+	for _, candidate := range all {
+		if bytes.Equal(candidate.SubjectKeyId, cert.AuthorityKeyId) {
+			byKeyID = append(byKeyID, candidate)
+		}
+	}
+
+	return selectIssuer(cert, byKeyID, placed), nil
+}
+
+// selectIssuer returns the first candidate that actually signed cert, or nil if none did. The
+// signature is what settles it, since a distinguished name or a key identifier is only a hint:
+// both are chosen by whoever issued the certificate and neither is unique on a token that holds
+// several generations of the same CA.
+func selectIssuer(cert *x509.Certificate, candidates []*x509.Certificate, placed map[string]bool) *x509.Certificate {
+	for _, candidate := range candidates {
+		if placed[string(candidate.Raw)] {
+			continue
+		}
+
+		if cert.CheckSignatureFrom(candidate) == nil {
+			return candidate
+		}
+	}
+
+	return nil
+}
+
 // FindAllCertificates retrieves every X.509 certificate on the token, or a nil slice if there
 // are none. It is the unfiltered counterpart of FindCertificate, for callers that know nothing
 // about what the token holds.
@@ -151,42 +291,55 @@ func (c *Context) FindAllCertificates() (certificates []*x509.Certificate, err e
 		return nil, errClosed
 	}
 
-	err = c.withSession(func(session *pkcs11Session) error {
-		template := []*pkcs11.Attribute{
-			pkcs11.NewAttribute(pkcs11.CKA_CLASS, pkcs11.CKO_CERTIFICATE),
-			pkcs11.NewAttribute(pkcs11.CKA_CERTIFICATE_TYPE, pkcs11.CKC_X_509),
-		}
-
-		// findKeysWithAttributes is not key-specific: it pages C_FindObjects over whatever
-		// class the template names. Certificates go through it as well, so that getting the
-		// batching right — C_FindObjects returns no more handles than it is asked for — is
-		// done in one place rather than two.
-		handles, err := findKeysWithAttributes(session, template)
-		if err != nil {
-			return err
-		}
-
-		for _, handle := range handles {
-			attributes := []*pkcs11.Attribute{
-				pkcs11.NewAttribute(pkcs11.CKA_VALUE, 0),
-			}
-			if attributes, err = session.ctx.GetAttributeValue(session.handle, handle, attributes); err != nil {
-				return err
-			}
-
-			certificate, err := parseCertificateValue(attributes[0].Value)
-			if err != nil {
-				return errors.WithMessage(err, describeCertificateObject(session, handle))
-			}
-
-			certificates = append(certificates, certificate)
-		}
-
-		return nil
+	err = c.withSession(func(session *pkcs11Session) (err error) {
+		certificates, err = findX509Certificates(session, nil)
+		return err
 	})
 
 	if err != nil {
 		return nil, err
+	}
+
+	return certificates, nil
+}
+
+// findX509Certificates returns every X.509 certificate object matching the given attributes, or a
+// nil slice if there are none. The class and certificate type are added to the template, so that
+// callers say only what distinguishes the certificates they want; passing nil matches every X.509
+// certificate on the token.
+//
+// An object that claims to be X.509 but whose CKA_VALUE does not parse fails the call rather than
+// being skipped, here as in FindAllCertificates: that is corruption, not a kind of certificate
+// this package cannot represent.
+func findX509Certificates(session *pkcs11Session, attributes []*pkcs11.Attribute) (certificates []*x509.Certificate, err error) {
+	template := append([]*pkcs11.Attribute{
+		pkcs11.NewAttribute(pkcs11.CKA_CLASS, pkcs11.CKO_CERTIFICATE),
+		pkcs11.NewAttribute(pkcs11.CKA_CERTIFICATE_TYPE, pkcs11.CKC_X_509),
+	}, attributes...)
+
+	// findKeysWithAttributes is not key-specific: it pages C_FindObjects over whatever class the
+	// template names. Certificates go through it as well, so that getting the batching right —
+	// C_FindObjects returns no more handles than it is asked for — is done in one place rather
+	// than two.
+	handles, err := findKeysWithAttributes(session, template)
+	if err != nil {
+		return nil, err
+	}
+
+	for _, handle := range handles {
+		values := []*pkcs11.Attribute{
+			pkcs11.NewAttribute(pkcs11.CKA_VALUE, 0),
+		}
+		if values, err = session.ctx.GetAttributeValue(session.handle, handle, values); err != nil {
+			return nil, err
+		}
+
+		certificate, err := parseCertificateValue(values[0].Value)
+		if err != nil {
+			return nil, errors.WithMessage(err, describeCertificateObject(session, handle))
+		}
+
+		certificates = append(certificates, certificate)
 	}
 
 	return certificates, nil

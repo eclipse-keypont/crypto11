@@ -46,6 +46,16 @@ was replaced, the config file was renamed, and the API surface was hardened afte
   certificates — restricts itself to `CKC_X_509` objects so a WTLS or attribute certificate is
   skipped instead of failing the call, and shares `FindCertificate`'s null-padding-tolerant DER
   parsing.
+- `FindCertificateChain`, returning a certificate together with the issuers above it that the token
+  also holds, leaf first ([#91](https://github.com/eclipse-keypont/crypto11/issues/91), proposed by
+  [@al1img](https://github.com/al1img) in
+  [#83](https://github.com/eclipse-keypont/crypto11/pull/83)). The leaf is located exactly as
+  `FindCertificate` locates it; each issuer above it is matched on `CKA_SUBJECT`, falling back to a
+  subject key identifier scan. A candidate is accepted only once it is shown to have signed the
+  certificate below it, so a token holding two CAs with the same distinguished name — a renewed or
+  cross-signed CA — yields the one the chain was really built with. The walk is iterative and skips
+  certificates it has already placed, so cross-signed CAs terminate the chain instead of looping,
+  and a chain whose root is not on the token is returned short rather than as an error.
 - `make release VERSION=x.y.z` target: tags, signs, and pushes a release, triggering a
   SLSA3-attested build.
 - `make sbom` target: generates a CycloneDX 1.6 SBOM with the same flags CI uses, so the published SBOM

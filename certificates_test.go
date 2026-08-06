@@ -12,6 +12,7 @@ import (
 	"crypto/x509/pkix"
 	"encoding/asn1"
 	"math/big"
+	"slices"
 	"testing"
 	"time"
 
@@ -254,6 +255,271 @@ func TestFindAllCertificates(t *testing.T) {
 			})
 		})
 	}
+}
+
+// signedCert is a generated certificate together with the key it was issued with, so that a test
+// can go on to sign the certificate below it in a chain.
+type signedCert struct {
+	cert *x509.Certificate
+	key  *ecdsa.PrivateKey
+}
+
+// generateCertChain returns one certificate per name, leaf first — the order FindCertificateChain
+// returns them in. The last name is the self-signed root, every other certificate is issued by the
+// name after it. Subject and authority key identifiers are set throughout, since the identifier
+// fallback in findIssuer has nothing to match on without them.
+func generateCertChain(t *testing.T, names ...string) []signedCert {
+	t.Helper()
+
+	chain := make([]signedCert, 0, len(names))
+
+	// Built root first, since each certificate needs its issuer's key to exist already.
+	for i := len(names) - 1; i >= 0; i-- {
+		key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+		require.NoError(t, err)
+
+		template := certTemplate(t, names[i], i > 0)
+
+		parent, signer := template, key
+		if issued := len(chain); issued > 0 {
+			issuer := chain[issued-1]
+			parent, signer = issuer.cert, issuer.key
+			template.AuthorityKeyId = issuer.cert.SubjectKeyId
+		}
+
+		der, err := x509.CreateCertificate(rand.Reader, template, parent, &key.PublicKey, signer)
+		require.NoError(t, err)
+
+		cert, err := x509.ParseCertificate(der)
+		require.NoError(t, err)
+
+		chain = append(chain, signedCert{cert: cert, key: key})
+	}
+
+	slices.Reverse(chain)
+
+	return chain
+}
+
+// certTemplate returns a certificate template with a random serial and subject key identifier.
+func certTemplate(t *testing.T, commonName string, isCA bool) *x509.Certificate {
+	t.Helper()
+
+	serial, err := rand.Int(rand.Reader, big.NewInt(1<<62))
+	require.NoError(t, err)
+
+	keyUsage := x509.KeyUsageDigitalSignature
+	if isCA {
+		keyUsage |= x509.KeyUsageCertSign
+	}
+
+	return &x509.Certificate{
+		SerialNumber:          serial,
+		Subject:               pkix.Name{CommonName: commonName},
+		SubjectKeyId:          randomBytes(),
+		NotBefore:             time.Now().Add(-time.Hour),
+		NotAfter:              time.Now().Add(24 * time.Hour),
+		BasicConstraintsValid: true,
+		IsCA:                  isCA,
+		KeyUsage:              keyUsage,
+	}
+}
+
+// importChain imports every certificate in chain under a fresh CKA_ID and returns the ids, leaf
+// first.
+func importChain(t *testing.T, ctx *Context, chain []signedCert) [][]byte {
+	t.Helper()
+
+	ids := make([][]byte, 0, len(chain))
+	for _, link := range chain {
+		ids = append(ids, importCert(t, ctx, link.cert))
+	}
+
+	return ids
+}
+
+// importCert imports one certificate under a fresh CKA_ID and returns it.
+func importCert(t *testing.T, ctx *Context, cert *x509.Certificate) []byte {
+	t.Helper()
+
+	id := randomBytes()
+	require.NoError(t, ctx.ImportCertificate(id, cert))
+
+	return id
+}
+
+// deleteCerts removes the certificates a test imported, and only those: the token is not assumed
+// to be the test's to clear. It must run before the context closes, so callers defer it inside the
+// withContext body rather than registering it with t.Cleanup.
+func deleteCerts(t *testing.T, ctx *Context, ids ...[][]byte) {
+	t.Helper()
+
+	for _, group := range ids {
+		for _, id := range group {
+			assert.NoError(t, ctx.DeleteCertificate(id, nil, nil))
+		}
+	}
+}
+
+// requireChainEqual checks that got holds exactly the certificates in want, in order.
+func requireChainEqual(t *testing.T, got []*x509.Certificate, want []signedCert) {
+	t.Helper()
+
+	require.Len(t, got, len(want))
+
+	for i, link := range want {
+		assert.Equal(t, link.cert.Raw, got[i].Raw,
+			"chain position %d: expected %q", i, link.cert.Subject.CommonName)
+	}
+}
+
+func TestFindCertificateChain(t *testing.T) {
+	skipTest(t, skipTestCert)
+
+	withContext(t, func(ctx *Context) {
+		chain := generateCertChain(t, "chain-leaf", "chain-intermediate", "chain-root")
+
+		ids := importChain(t, ctx, chain)
+		defer deleteCerts(t, ctx, ids)
+
+		got, err := ctx.FindCertificateChain(ids[0], nil, nil)
+		require.NoError(t, err)
+
+		requireChainEqual(t, got, chain)
+	})
+}
+
+// A root kept in the caller's system trust store rather than on the HSM is the ordinary
+// arrangement, so a chain that runs out of issuers is returned short instead of failing.
+func TestFindCertificateChainStopsAtMissingIssuer(t *testing.T) {
+	skipTest(t, skipTestCert)
+
+	withContext(t, func(ctx *Context) {
+		chain := generateCertChain(t, "partial-leaf", "partial-intermediate", "partial-root")
+
+		ids := importChain(t, ctx, chain[:2])
+		defer deleteCerts(t, ctx, ids)
+
+		got, err := ctx.FindCertificateChain(ids[0], nil, nil)
+		require.NoError(t, err)
+
+		requireChainEqual(t, got, chain[:2])
+	})
+}
+
+// Two CAs can share a distinguished name — a renewed or cross-signed CA — so the issuer has to be
+// settled by the signature rather than by whichever object the token returns first.
+func TestFindCertificateChainIgnoresSameSubjectDecoy(t *testing.T) {
+	skipTest(t, skipTestCert)
+
+	withContext(t, func(ctx *Context) {
+		names := []string{"decoy-leaf", "decoy-intermediate", "decoy-root"}
+
+		chain := generateCertChain(t, names...)
+		decoys := generateCertChain(t, names...)
+
+		// Imported first, so that a finder taking the first match would take the wrong one.
+		decoyIDs := importChain(t, ctx, decoys[1:])
+		ids := importChain(t, ctx, chain)
+		defer deleteCerts(t, ctx, decoyIDs, ids)
+
+		got, err := ctx.FindCertificateChain(ids[0], nil, nil)
+		require.NoError(t, err)
+
+		requireChainEqual(t, got, chain)
+	})
+}
+
+// CKA_SUBJECT is set by whoever imported the certificate and need not agree with the DER it
+// holds, so the walk falls back to the authority and subject key identifiers inside the
+// certificates themselves.
+func TestFindCertificateChainFallsBackToKeyID(t *testing.T) {
+	skipTest(t, skipTestCert)
+
+	withContext(t, func(ctx *Context) {
+		chain := generateCertChain(t, "keyid-leaf", "keyid-root")
+
+		template, err := NewAttributeSetWithID(randomBytes())
+		require.NoError(t, err)
+
+		// A subject the issuer search cannot match, leaving only the key identifier.
+		require.NoError(t, template.Set(CkaSubject, randomBytes()))
+		require.NoError(t, ctx.ImportCertificateWithAttributes(template, chain[1].cert))
+
+		id := importCert(t, ctx, chain[0].cert)
+		defer deleteCerts(t, ctx, [][]byte{id, template[CkaId].Value})
+
+		got, err := ctx.FindCertificateChain(id, nil, nil)
+		require.NoError(t, err)
+
+		requireChainEqual(t, got, chain)
+	})
+}
+
+// Two CAs that cross-sign each other are a cycle in the issuer graph. The walk has to stop rather
+// than follow it: anything able to write to the token decides how long the lookup runs.
+func TestFindCertificateChainTerminatesOnCycle(t *testing.T) {
+	skipTest(t, skipTestCert)
+
+	withContext(t, func(ctx *Context) {
+		keyA, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+		require.NoError(t, err)
+		keyB, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+		require.NoError(t, err)
+
+		templateA := certTemplate(t, "cycle-a", true)
+		templateB := certTemplate(t, "cycle-b", true)
+		templateLeaf := certTemplate(t, "cycle-leaf", false)
+
+		templateA.AuthorityKeyId = templateB.SubjectKeyId
+		templateB.AuthorityKeyId = templateA.SubjectKeyId
+		templateLeaf.AuthorityKeyId = templateA.SubjectKeyId
+
+		// A is issued by B and B by A, so following issuer names alone never terminates.
+		certA := createCert(t, templateA, templateB, &keyA.PublicKey, keyB)
+		certB := createCert(t, templateB, templateA, &keyB.PublicKey, keyA)
+		leaf := createCert(t, templateLeaf, templateA, &keyA.PublicKey, keyA)
+
+		idA := importCert(t, ctx, certA)
+		idB := importCert(t, ctx, certB)
+		id := importCert(t, ctx, leaf)
+		defer deleteCerts(t, ctx, [][]byte{idA, idB, id})
+
+		got, err := ctx.FindCertificateChain(id, nil, nil)
+		require.NoError(t, err)
+
+		require.Len(t, got, 3)
+		assert.Equal(t, leaf.Raw, got[0].Raw)
+		assert.Equal(t, certA.Raw, got[1].Raw)
+		assert.Equal(t, certB.Raw, got[2].Raw)
+	})
+}
+
+func TestFindCertificateChainNotFound(t *testing.T) {
+	skipTest(t, skipTestCert)
+
+	withContext(t, func(ctx *Context) {
+		got, err := ctx.FindCertificateChain(randomBytes(), nil, nil)
+		require.NoError(t, err)
+		assert.Nil(t, got)
+
+		_, err = ctx.FindCertificateChain(nil, nil, nil)
+		require.Error(t, err)
+	})
+}
+
+// createCert signs template with the issuer's key and returns the parsed result.
+func createCert(t *testing.T, template, parent *x509.Certificate,
+	pub *ecdsa.PublicKey, signer *ecdsa.PrivateKey) *x509.Certificate {
+	t.Helper()
+
+	der, err := x509.CreateCertificate(rand.Reader, template, parent, pub, signer)
+	require.NoError(t, err)
+
+	cert, err := x509.ParseCertificate(der)
+	require.NoError(t, err)
+
+	return cert
 }
 
 func generateRandomCert(t *testing.T) *x509.Certificate {

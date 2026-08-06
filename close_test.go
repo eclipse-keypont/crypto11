@@ -79,6 +79,9 @@ func TestErrorAfterClosed(t *testing.T) {
 
 	assert.Equal(t, errClosed, err)
 
+	_, err = ctx.FindCertificateChain(bytes, nil, nil)
+	assert.Equal(t, errClosed, err)
+
 	_, err = ctx.GetAttribute(nil, CkaLabel)
 	assert.Equal(t, errClosed, err)
 
