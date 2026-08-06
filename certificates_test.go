@@ -4,10 +4,12 @@
 package crypto11
 
 import (
+	"bytes"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/rsa"
+	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/asn1"
@@ -505,6 +507,48 @@ func TestFindCertificateChainNotFound(t *testing.T) {
 
 		_, err = ctx.FindCertificateChain(nil, nil, nil)
 		require.Error(t, err)
+	})
+}
+
+// A leaf on its own does not verify at a peer that lacks the intermediate, so the paired finder
+// hands crypto/tls the issuers above it as well.
+func TestFindAllPairedCertificatesReturnsChain(t *testing.T) {
+	skipTest(t, skipTestCert)
+
+	withContext(t, func(ctx *Context) {
+		chain := generateCertChain(t, "paired-leaf", "paired-intermediate", "paired-root")
+
+		// The leaf is paired with the private key by CKA_ID. The issuers above it share no id
+		// with the key and can only be reached by the chain walk.
+		id := randomBytes()
+		key, err := ctx.GenerateECDSAKeyPair(id, elliptic.P256())
+		require.NoError(t, err)
+		defer func() {
+			assert.NoError(t, key.Delete())
+		}()
+
+		require.NoError(t, ctx.ImportCertificate(id, chain[0].cert))
+		issuerIDs := importChain(t, ctx, chain[1:])
+		defer deleteCerts(t, ctx, [][]byte{id}, issuerIDs)
+
+		found, err := ctx.FindAllPairedCertificates()
+		require.NoError(t, err)
+
+		// The token may hold key pairs this test did not create, so the entry is picked out by
+		// its leaf rather than by position.
+		var got *tls.Certificate
+		for i := range found {
+			if found[i].Leaf != nil && bytes.Equal(found[i].Leaf.Raw, chain[0].cert.Raw) {
+				got = &found[i]
+				break
+			}
+		}
+		require.NotNil(t, got, "the paired leaf was not returned")
+
+		require.Len(t, got.Certificate, len(chain))
+		for i, link := range chain {
+			assert.Equal(t, link.cert.Raw, got.Certificate[i], "chain position %d", i)
+		}
 	})
 }
 

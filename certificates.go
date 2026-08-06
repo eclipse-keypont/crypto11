@@ -367,7 +367,18 @@ func describeCertificateObject(session *pkcs11Session, handle pkcs11.ObjectHandl
 	return fmt.Sprintf("certificate with id=%x and label=%q", attributes[0].Value, attributes[1].Value)
 }
 
-// FindAllPairedCertificates finds all certificates on the token that have a matching private key.
+// FindAllPairedCertificates finds all certificates on the token that have a matching private key,
+// as tls.Certificate values ready to hand to crypto/tls.
+//
+// Each returned Certificate holds the leaf followed by the issuers above it that the token also
+// holds, in the order crypto/tls sends them, built by the same walk as FindCertificateChain — a
+// leaf alone does not verify at a peer that lacks the intermediate. The chain is what the token
+// holds and no more: it ends where the issuers run out, so a caller whose intermediates live
+// elsewhere still has to supply them, and a caller that would rather not send a self-signed root
+// can drop a trailing entry that is its own issuer.
+//
+// A private key whose certificate cannot be paired, or whose type this package cannot represent,
+// is skipped rather than failing the call.
 func (c *Context) FindAllPairedCertificates() (certificates []tls.Certificate, err error) {
 	if c.closed.Get() {
 		return nil, errClosed
@@ -403,12 +414,20 @@ func (c *Context) FindAllPairedCertificates() (certificates []tls.Certificate, e
 				continue
 			}
 
+			chain, err := findIssuerChain(session, certificate)
+			if err != nil {
+				return err
+			}
+
 			tlsCert := tls.Certificate{
 				Leaf:       certificate,
 				PrivateKey: privateKey,
 			}
 
-			tlsCert.Certificate = append(tlsCert.Certificate, certificate.Raw)
+			for _, link := range chain {
+				tlsCert.Certificate = append(tlsCert.Certificate, link.Raw)
+			}
+
 			certificates = append(certificates, tlsCert)
 		}
 

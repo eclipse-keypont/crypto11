@@ -17,6 +17,12 @@ was replaced, the config file was renamed, and the API surface was hardened afte
 - `FindKeyRSAPairsWithAttributes` is renamed to `FindRSAKeyPairsWithAttributes`, matching every
   other `FindRSA*` finder. The old spelling was the odd one out and made the RSA finders hard to
   find; v2 is the only chance to fix it.
+- `FindAllPairedCertificates` now returns the full certificate chain in each `tls.Certificate`,
+  where it previously returned the leaf alone. `Certificate[0]` is unchanged; the issuers the token
+  also holds follow it, in the order crypto/tls sends them. A caller that assumed exactly one entry
+  — or that appended its own intermediates to the result — needs to look again. The motivation is
+  that a leaf on its own does not verify at a peer lacking the intermediate, which made the
+  returned value unusable for TLS without further work.
 
 ### Added
 
