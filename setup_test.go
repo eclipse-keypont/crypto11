@@ -5,6 +5,7 @@ package crypto11
 
 import (
 	"encoding/json"
+	"flag"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -22,8 +23,9 @@ import (
 //     "crypto11.config.json" file, runs all tests, then cleans up.  No external tools required.
 //   - PKCS11_MODULE not set — falls back to the pre-existing "crypto11.config.json" file
 //     (the manual setup described in README.md).
-//   - Neither set — skips the entire suite cleanly (no failures); used in CI
-//     when no HSM module is provisioned.
+//   - Neither set — runs the fuzz targets only (they need no token) and skips
+//     the HSM suite cleanly, without failures; used in CI when no HSM module is
+//     provisioned, and by the Fuzz workflow.
 //
 // SoftHSMv3 (https://github.com/pqctoday-org/pqctoday-hsm) is required for ML-KEM
 // and other PKCS#11 v3.2 tests; a standard SoftHSMv2 install will self-skip
@@ -44,13 +46,34 @@ func TestMain(m *testing.M) {
 		os.Exit(code)
 	}
 	// No module supplied — rely on a pre-existing "crypto11.config.json" file.
-	// If that file is also absent (e.g. in CI without a provisioned HSM), skip
-	// the entire suite rather than failing with CKR_GENERAL_ERROR on every test.
+	// If that file is also absent (e.g. in CI without a provisioned HSM), narrow
+	// the run to the fuzz targets in fuzz_test.go rather than failing with
+	// CKR_GENERAL_ERROR on every test. Those parse bytes and need no token, so
+	// their seed corpora — and the fuzzing engine itself, under -fuzz — still run
+	// where the rest of the suite cannot.
 	if _, err := os.Stat("crypto11.config.json"); os.IsNotExist(err) {
-		fmt.Fprintln(os.Stderr, "crypto11: no PKCS11_MODULE and no crypto11.config.json — skipping all HSM tests")
-		os.Exit(0)
+		fmt.Fprintln(os.Stderr, "crypto11: no PKCS11_MODULE and no crypto11.config.json — running fuzz targets only, skipping HSM tests")
+		limitToFuzzTargets()
+		os.Exit(m.Run())
 	}
 	os.Exit(m.Run())
+}
+
+// limitToFuzzTargets restricts the run to the FuzzXxx functions, unless the caller has
+// already asked for something specific with -run. The testing package registers its flags
+// before TestMain is entered but does not parse them until m.Run, hence the explicit
+// flag.Parse.
+func limitToFuzzTargets() {
+	flag.Parse()
+
+	run := flag.Lookup("test.run")
+	if run == nil || run.Value.String() != "" {
+		return
+	}
+
+	if err := flag.Set("test.run", "^Fuzz"); err != nil {
+		fmt.Fprintf(os.Stderr, "crypto11: could not limit the run to fuzz targets: %v\n", err)
+	}
 }
 
 // initSoftHSM3Token creates ephemeral SoftHSM tokens, initialises them

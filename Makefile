@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: 2026 Thales Group and the crypto11 Contributors
 # SPDX-License-Identifier: MIT
 
-.PHONY: build vet test lint lint-fix govulncheck notices sbom version release
+.PHONY: build vet test fuzz lint lint-fix govulncheck notices sbom version release
 
 # ── Tool preconditions ───────────────────────────────────────────────────────
 # $(call require,<binary>,<how to install it>) — fail early with an install hint.
@@ -38,6 +38,31 @@ vet:
 #   PKCS11_MODULE=/usr/local/lib/softhsm/libsofthsm3.so go test ./...
 test:
 	go test ./...
+
+# ── Fuzzing ──────────────────────────────────────────────────────────────────
+# Runs each fuzz target in fuzz_test.go in turn, for FUZZTIME each. No PKCS#11
+# module is needed: the targets parse bytes off the token and TestMain narrows
+# the run to them when no token is configured.
+#
+#   make fuzz                          # every target, 30s each
+#   make fuzz FUZZTIME=5m              # longer budget
+#   make fuzz FUZZ=FuzzKMACEncodings   # one target
+#
+# The seed corpora already run as part of `make test`; this is the open-ended
+# search on top of them. A failing input lands in testdata/fuzz/<Target>/ —
+# commit it, and `make test` replays it from then on.
+FUZZTIME ?= 30s
+FUZZ ?=
+# Target names are read out of the file rather than listed here, so a new target
+# is picked up by adding it. The awk/sed pair avoids parentheses, which make
+# would try to balance inside $(shell ...).
+FUZZ_TARGETS := $(if $(FUZZ),$(FUZZ),$(shell awk '/^func Fuzz/ {print $$2}' fuzz_test.go | sed 's/[^A-Za-z0-9_].*//'))
+
+fuzz:
+	@for target in $(FUZZ_TARGETS); do \
+	    echo "── $$target ($(FUZZTIME)) ──"; \
+	    go test -run '^$$' -fuzz "^$$target$$" -fuzztime $(FUZZTIME) . || exit 1; \
+	done
 
 # ── Lint ─────────────────────────────────────────────────────────────────────
 # Runs golangci-lint (v2) against .golangci.yml — the same checks as the CI
