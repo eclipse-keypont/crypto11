@@ -8,6 +8,9 @@ demo/demo
 /vendor/
 .env
 
+# local override files of any kind, e.g. crypto11.config.json.local
+*.local
+
 # scratch file `make notices` writes before atomically replacing NOTICES.md
 NOTICES.md.tmp
 
