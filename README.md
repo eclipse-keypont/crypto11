@@ -271,7 +271,7 @@ PKCS11_MODULE=/path/to/libsofthsmv3.so PKCS11_PIN=mypin go test ./...
 ```
 
 `TestMain` in `setup_test.go` creates three ephemeral tokens (`crypto11-test`, `token1`, `token2`)
-via the PKCS#11 API, exports the `CRYPTO11_*` variables that point at them, runs all tests, then
+via the PKCS#11 API, exports the `PKCS11_*` variables that point at them, runs all tests, then
 cleans up. No external tools or manual token setup are required, and **nothing is written into the
 working tree** — so an interrupted run cannot leave your module path or PIN in a file git would
 offer to commit.
