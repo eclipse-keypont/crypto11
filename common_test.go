@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2026 Thales Group and the crypto11 Contributors
+// SPDX-FileCopyrightText: 2026 The Eclipse Foundation KeyPont project maintainers
+// SPDX-License-Identifier: MIT
+
 package crypto11
 
 import (
@@ -13,7 +17,7 @@ func skipIfMechUnsupported(t *testing.T, ctx *Context, wantMech uint) {
 	require.NoError(t, err)
 
 	for _, mech := range mechs {
-		if mech.Mechanism == wantMech {
+		if mech == wantMech {
 			return
 		}
 	}
@@ -27,36 +31,8 @@ func randomBytes() []byte {
 	return result
 }
 
-func TestULongMasking(t *testing.T) {
-	ulongData := uint(0x33221100ddccbbaa)
-	ulongSlice := ulongToBytes(ulongData)
-
-	// Build an slice that is longer than the size of a ulong
-	extraLongSlice := append(ulongSlice, ulongSlice...)
-
-	tests := []struct {
-		slice    []uint8
-		expected uint
-	}{
-		{ulongSlice[0:0], 0},
-		{ulongSlice[0:1], 0xaa},
-		{ulongSlice[0:2], 0xbbaa},
-		{ulongSlice[0:3], 0xccbbaa},
-		{ulongSlice[0:4], 0xddccbbaa},
-		{ulongSlice[0:5], 0x00ddccbbaa},
-		{ulongSlice[0:6], 0x1100ddccbbaa},
-		{ulongSlice[0:7], 0x221100ddccbbaa},
-		{ulongSlice[0:8], 0x33221100ddccbbaa},
-		{extraLongSlice, 0x33221100ddccbbaa},
-	}
-
-	for _, test := range tests {
-		got := bytesToUlong(test.slice)
-		if test.expected != got {
-			t.Errorf("conversion failed: 0x%X != 0x%X", test.expected, got)
-		}
-	}
-}
+// The CK_ULONG conversions these tests used to cover now live in the pkcs11-go
+// binding, along with their tests: see cryptoki.ULongToBytes / BytesToULong.
 
 func makeIV(cipher *SymmetricCipher) ([]byte, error) {
 	iv := make([]byte, cipher.BlockSize)
@@ -68,7 +44,7 @@ func createKey(ctx *Context, keyLabel string, keySize int, KeyType int) (key *Se
 	id := make([]byte, 16)
 	rand.Read(id)
 	if key, err = ctx.GenerateSecretKeyWithLabel(id, []byte(keyLabel), keySize, Ciphers[KeyType]); err != nil {
-		return nil, fmt.Errorf("error generating key with label '%s': %v", keyLabel, err)
+		return nil, fmt.Errorf("error generating key with label '%s': %w", keyLabel, err)
 	}
 	return key, nil
 }

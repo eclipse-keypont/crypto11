@@ -1,32 +1,17 @@
-// Copyright 2024 Thales Group
-//
-// Permission is hereby granted, free of charge, to any person obtaining
-// a copy of this software and associated documentation files (the
-// "Software"), to deal in the Software without restriction, including
-// without limitation the rights to use, copy, modify, merge, publish,
-// distribute, sublicense, and/or sell copies of the Software, and to
-// permit persons to whom the Software is furnished to do so, subject to
-// the following conditions:
-//
-// The above copyright notice and this permission notice shall be
-// included in all copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
-// EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
-// MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
-// NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE
-// LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
-// OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
-// WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+// SPDX-FileCopyrightText: 2026 Thales Group and the crypto11 Contributors
+// SPDX-FileCopyrightText: 2026 The Eclipse Foundation KeyPont project maintainers
+// SPDX-License-Identifier: MIT
 
 package crypto11
 
 import (
 	"context"
 	"errors"
+	"time"
 
-	"github.com/miekg/pkcs11"
-	"github.com/thales-e-security/pool"
+	pkcs11 "github.com/eclipse-keypont/pkcs11-go/cryptoki"
+
+	"github.com/eclipse-keypont/crypto11/v2/internal/pool"
 )
 
 // pkcs11Session wraps a PKCS#11 session handle so we can use it in a resource pool.
@@ -65,7 +50,7 @@ func (c *Context) getSession() (*pkcs11Session, error) {
 	}
 
 	resource, err := c.pool.Get(ctx)
-	if err == pool.ErrClosed {
+	if errors.Is(err, pool.ErrClosed) {
 		// Our Context must have been closed, return a nicer error.
 		// We don't use errClosed to ensure our tests identify functions that aren't checking for closure
 		// correctly.
@@ -76,6 +61,81 @@ func (c *Context) getSession() (*pkcs11Session, error) {
 	}
 
 	return resource.(*pkcs11Session), nil
+}
+
+// PoolStats is a snapshot of a Context's session pool counters, as returned by
+// Context.PoolStats. It is a plain value with no reference to the pool itself,
+// so it is safe to keep, copy and marshal (durations marshal to JSON as
+// nanoseconds).
+//
+// The fields are read one at a time from the pool's atomic counters rather than
+// under a lock, so a snapshot taken while other goroutines are using the token
+// is individually accurate but not necessarily internally consistent: Available
+// and InUse need not add up to Capacity.
+type PoolStats struct {
+	// Capacity is the number of sessions the pool may hand out. crypto11 keeps
+	// one session of its own to hold the login state, so this is one less than
+	// the effective MaxSessions. Closing the Context sets it to zero.
+	Capacity int64
+
+	// Available is the number of sessions that could be taken from the pool
+	// without waiting. A session that has not been opened yet still counts as
+	// available: the pool opens it on first use.
+	Available int64
+
+	// Active is the number of sessions actually open on the token, whether idle
+	// in the pool or currently claimed. It grows towards Capacity as load
+	// requires, and never shrinks unless sessions are closed.
+	Active int64
+
+	// InUse is the number of sessions claimed by in-flight operations.
+	InUse int64
+
+	// MaxCapacity is the ceiling Capacity could be raised to. crypto11 creates
+	// the pool at full size, so this is the initial Capacity and, unlike
+	// Capacity, it is unaffected by Close.
+	MaxCapacity int64
+
+	// WaitCount is the cumulative number of operations that had to wait for a
+	// session because none was available, and WaitTime the total time they
+	// spent waiting. Both only ever grow. A rising WaitCount means MaxSessions
+	// is below what the workload needs (or that Config.PoolWaitTimeout is about
+	// to start biting).
+	WaitCount int64
+	WaitTime  time.Duration
+
+	// IdleTimeout is how long an idle session is kept before being closed and
+	// replaced, and IdleClosed the number of sessions closed that way. crypto11
+	// does not currently enable idle timeouts, so both are always zero; they
+	// are reported for completeness.
+	IdleTimeout time.Duration
+	IdleClosed  int64
+}
+
+// PoolStats returns a snapshot of the state of the session pool, for metrics
+// and diagnostics.
+//
+// It only reads counters the pool maintains in memory: no PKCS#11 call is made
+// and no session is taken, so it is cheap and safe to call from a metrics
+// scrape, concurrently with any other operation, and on a closed Context (where
+// it reports the pool as it was torn down, with Capacity zero).
+func (c *Context) PoolStats() PoolStats {
+	if c.pool == nil {
+		// Only reachable for a Context that did not come from Configure.
+		return PoolStats{}
+	}
+
+	return PoolStats{
+		Capacity:    c.pool.Capacity(),
+		Available:   c.pool.Available(),
+		Active:      c.pool.Active(),
+		InUse:       c.pool.InUse(),
+		MaxCapacity: c.pool.MaxCap(),
+		WaitCount:   c.pool.WaitCount(),
+		WaitTime:    c.pool.WaitTime(),
+		IdleTimeout: c.pool.IdleTimeout(),
+		IdleClosed:  c.pool.IdleClosed(),
+	}
 }
 
 // resourcePoolFactoryFunc is called by the resource pool when a new session is needed.

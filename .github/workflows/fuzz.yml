@@ -1,0 +1,69 @@
+name: Fuzz
+
+# Runs the native Go fuzz targets in fuzz_test.go for a fixed budget per target.
+#
+# This is deliberately not part of the CI workflow. Fuzzing is open-ended, so it
+# runs on a schedule rather than on every pull request; what PRs get is the seed
+# corpus of every target, replayed for free by `go test ./...` in ci.yml.
+#
+# The targets parse bytes and need no PKCS#11 module — TestMain (setup_test.go)
+# narrows the run to them when no token is configured.
+#
+# When a target fails, the input that broke it is written to
+# testdata/fuzz/<Target>/ and uploaded as an artifact. Commit that file: it then
+# replays on every subsequent `go test ./...` as a regression case.
+
+on:
+  schedule:
+    # The 1st of the month, 03:17 UTC. Off the hour, to avoid the top-of-hour
+    # runner crush. Use workflow_dispatch for a run between two of these.
+    - cron: '17 3 1 * *'
+  workflow_dispatch:
+    inputs:
+      fuzztime:
+        description: 'Fuzzing budget per target (Go duration, e.g. 10m)'
+        required: false
+        default: '5m'
+
+permissions:
+  contents: read
+
+jobs:
+  fuzz:
+    name: ${{ matrix.target }}
+    runs-on: ubuntu-latest
+    strategy:
+      # One target failing says nothing about the others, and each one's corpus
+      # is worth having.
+      fail-fast: false
+      matrix:
+        target:
+          - FuzzParseCertificateValue
+          - FuzzUnmarshalEcPoint
+          - FuzzUnmarshalEcParams
+          - FuzzDSASignatureRoundTrip
+          - FuzzDSASignatureUnmarshalDER
+          - FuzzMLKEMDeriveKey
+          - FuzzKMACEncodings
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Set up Go
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Fuzz ${{ matrix.target }}
+        run: |
+          go test -run '^$' -fuzz '^${{ matrix.target }}$' \
+            -fuzztime '${{ inputs.fuzztime || '5m' }}' .
+
+      - name: Upload the failing input
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: fuzz-failure-${{ matrix.target }}
+          path: testdata/fuzz/
+          if-no-files-found: ignore

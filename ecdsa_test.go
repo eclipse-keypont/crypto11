@@ -1,23 +1,6 @@
-// Copyright 2024 Thales Group
-//
-// Permission is hereby granted, free of charge, to any person obtaining
-// a copy of this software and associated documentation files (the
-// "Software"), to deal in the Software without restriction, including
-// without limitation the rights to use, copy, modify, merge, publish,
-// distribute, sublicense, and/or sell copies of the Software, and to
-// permit persons to whom the Software is furnished to do so, subject to
-// the following conditions:
-//
-// The above copyright notice and this permission notice shall be
-// included in all copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
-// EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
-// MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
-// NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE
-// LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
-// OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
-// WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+// SPDX-FileCopyrightText: 2026 Thales Group and the crypto11 Contributors
+// SPDX-FileCopyrightText: 2026 The Eclipse Foundation KeyPont project maintainers
+// SPDX-License-Identifier: MIT
 
 package crypto11
 
@@ -29,9 +12,10 @@ import (
 	_ "crypto/sha1"
 	_ "crypto/sha256"
 	_ "crypto/sha512"
+	"errors"
 	"testing"
 
-	"github.com/miekg/pkcs11"
+	pkcs11 "github.com/eclipse-keypont/pkcs11-go/cryptoki"
 
 	"github.com/stretchr/testify/assert"
 
@@ -63,13 +47,7 @@ func TestNativeECDSA(t *testing.T) {
 }
 
 func TestHardECDSA(t *testing.T) {
-	ctx, err := ConfigureFromFile("config")
-	require.NoError(t, err)
-
-	defer func() {
-		err = ctx.Close()
-		require.NoError(t, err)
-	}()
+	ctx := testContext(t)
 
 	for _, curve := range curves {
 		id := randomBytes()
@@ -106,7 +84,8 @@ func testEcdsaSigning(t *testing.T, key crypto.Signer, hashFunction crypto.Hash,
 
 	sigDER, err := key.Sign(rand.Reader, plaintextHash, nil)
 
-	p11Err, ok := err.(pkcs11.Error)
+	var p11Err pkcs11.Error
+	ok := errors.As(err, &p11Err)
 	if ok && p11Err == pkcs11.CKR_KEY_SIZE_RANGE {
 		// Returned by CloudHSM (at least), for key sizes it doesn't support.
 		t.Logf("Skipping unsupported curve %s and hash %s", curveName, hashName)
@@ -124,7 +103,7 @@ func testEcdsaSigning(t *testing.T, key crypto.Signer, hashFunction crypto.Hash,
 	err = sig.unmarshalDER(sigDER)
 	require.NoError(t, err)
 
-	ecdsaPubkey := key.Public().(crypto.PublicKey).(*ecdsa.PublicKey)
+	ecdsaPubkey := key.Public().(*ecdsa.PublicKey)
 	if !ecdsa.Verify(ecdsaPubkey, plaintextHash, sig.R, sig.S) {
 		t.Errorf("ECDSA Verify (hash %v): %v", hashFunction, err)
 	}
@@ -132,14 +111,9 @@ func testEcdsaSigning(t *testing.T, key crypto.Signer, hashFunction crypto.Hash,
 }
 
 func TestEcdsaRequiredArgs(t *testing.T) {
-	ctx, err := ConfigureFromFile("config")
-	require.NoError(t, err)
+	ctx := testContext(t)
 
-	defer func() {
-		require.NoError(t, ctx.Close())
-	}()
-
-	_, err = ctx.GenerateECDSAKeyPair(nil, elliptic.P224())
+	_, err := ctx.GenerateECDSAKeyPair(nil, elliptic.P224())
 	require.Error(t, err)
 
 	val := randomBytes()

@@ -1,32 +1,14 @@
-// Copyright 2024 Thales Group
-//
-// Permission is hereby granted, free of charge, to any person obtaining
-// a copy of this software and associated documentation files (the
-// "Software"), to deal in the Software without restriction, including
-// without limitation the rights to use, copy, modify, merge, publish,
-// distribute, sublicense, and/or sell copies of the Software, and to
-// permit persons to whom the Software is furnished to do so, subject to
-// the following conditions:
-//
-// The above copyright notice and this permission notice shall be
-// included in all copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
-// EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
-// MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
-// NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE
-// LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
-// OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
-// WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+// SPDX-FileCopyrightText: 2026 Thales Group and the crypto11 Contributors
+// SPDX-FileCopyrightText: 2026 The Eclipse Foundation KeyPont project maintainers
+// SPDX-License-Identifier: MIT
 
 package crypto11
 
 import (
-	"errors"
 	"fmt"
 	"strings"
 
-	"github.com/miekg/pkcs11"
+	pkcs11 "github.com/eclipse-keypont/pkcs11-go/cryptoki"
 )
 
 // AttributeType represents a PKCS#11 CK_ATTRIBUTE value.
@@ -35,7 +17,7 @@ type AttributeType = uint
 // Attribute represents a PKCS#11 CK_ATTRIBUTE type.
 type Attribute = pkcs11.Attribute
 
-//noinspection GoUnusedConst,GoDeprecation
+// noinspection GoUnusedConst,GoDeprecation
 const (
 	CkaClass                  = AttributeType(0x00000000)
 	CkaToken                  = AttributeType(0x00000001)
@@ -166,6 +148,13 @@ const (
 	CkaDefaultCmsAttributes   = AttributeType(0x00000502)
 	CkaSupportedCmsAttributes = AttributeType(0x00000503)
 	CkaAllowedMechanisms      = ckfArrayAttribute | AttributeType(0x00000600)
+
+	/* new for v3.2 (PKCS#11 v3.2, KEM / post-quantum) */
+	CkaParameterSet        = AttributeType(0x0000061d)
+	CkaEncapsulateTemplate = AttributeType(0x0000062a)
+	CkaDecapsulateTemplate = AttributeType(0x0000062b)
+	CkaEncapsulate         = AttributeType(0x00000633)
+	CkaDecapsulate         = AttributeType(0x00000634)
 )
 
 // NewAttribute is a helper function that populates a new Attribute for common data types. This function will
@@ -174,7 +163,7 @@ func NewAttribute(attributeType AttributeType, value interface{}) (a *Attribute,
 	// catch any panics from the pkcs11.NewAttribute() call to keyHandle the error cleanly
 	defer func() {
 		if r := recover(); r != nil {
-			err = errors.New(fmt.Sprintf("failed creating Attribute: %v", r))
+			err = fmt.Errorf("failed creating Attribute: %v", r)
 		}
 	}()
 
@@ -185,7 +174,7 @@ func NewAttribute(attributeType AttributeType, value interface{}) (a *Attribute,
 // CopyAttribute returns a deep copy of the given Attribute.
 func CopyAttribute(a *Attribute) *Attribute {
 	var value []byte
-	if a.Value != nil && len(a.Value) > 0 {
+	if len(a.Value) > 0 {
 		value = append([]byte(nil), a.Value...)
 	}
 	return &pkcs11.Attribute{
@@ -238,7 +227,7 @@ func (a AttributeSet) AddIfNotPresent(additional []*Attribute) {
 
 // ToSlice returns a deep copy of Attributes contained in the AttributeSet.
 func (a AttributeSet) ToSlice() []*Attribute {
-	var attributes []*Attribute
+	attributes := make([]*Attribute, 0, len(a))
 	for _, v := range a {
 		duplicateAttr := CopyAttribute(v)
 		attributes = append(attributes, duplicateAttr)
@@ -525,6 +514,18 @@ func attributeTypeString(a AttributeType) string {
 		return "CkaSupportedCmsAttributes"
 	case CkaAllowedMechanisms:
 		return "CkaAllowedMechanisms"
+
+	case CkaParameterSet:
+		return "CkaParameterSet"
+	case CkaEncapsulateTemplate:
+		return "CkaEncapsulateTemplate"
+	case CkaDecapsulateTemplate:
+		return "CkaDecapsulateTemplate"
+	case CkaEncapsulate:
+		return "CkaEncapsulate"
+	case CkaDecapsulate:
+		return "CkaDecapsulate"
+
 	default:
 		return "Unknown"
 	}

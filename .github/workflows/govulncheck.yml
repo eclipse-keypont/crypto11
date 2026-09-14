@@ -1,0 +1,40 @@
+name: Vulnerability Scan govulncheck
+
+# Scans this module and the reachable parts of its dependencies against the Go
+# vulnerability database. govulncheck is reachability-aware: it only reports
+# CVEs whose affected symbols are actually called. Runs on PRs and weekly so
+# newly disclosed CVEs surface even without a code change.
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+  schedule:
+    - cron: '27 6 * * 1'
+  workflow_dispatch:
+  # Allows the Release pipeline to gate a tag on a passing vulnerability scan.
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  govulncheck:
+    name: govulncheck
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Set up Go
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Install govulncheck
+        run: go install golang.org/x/vuln/cmd/govulncheck@3e6f44f962742443c11ae2261f02e0c917aeb2bc # v1.5.0
+
+      - name: Run govulncheck
+        run: govulncheck ./...

@@ -3,4 +3,34 @@ crypto11.test
 demo/*.pem
 demo/demo
 /.idea/
+.vscode/
+
 /vendor/
+
+# Local test environment: holds a module path and a PIN. Copy .env.template to
+# .env and edit that; only the template is tracked.
+.env
+
+# local override files of any kind, e.g. crypto11.config.json.local
+*.local
+
+# scratch file `make notices` writes before atomically replacing NOTICES.md
+NOTICES.md.tmp
+
+# locally generated SBOMs and release artifacts (`make sbom`, release assets)
+*.cdx.json
+crypto11-v*.tar.gz
+crypto11-v*.tar.gz.*
+crypto11-v*.intoto.jsonl
+
+# Local test configuration. These hold an absolute path to a PKCS#11 module and
+# a PIN, so they must never be tracked. crypto11.config.json.template is the
+# committed placeholder to copy from; see CONTRIBUTING.md.
+#
+# Note: a rule here has no effect on a file that is already in the index. If
+# crypto11.config.json ever shows up in `git status` as tracked again, the fix
+# is `git rm --cached crypto11.config.json`, not another ignore line.
+crypto11.config.json
+
+# Code assistants
+.claude
