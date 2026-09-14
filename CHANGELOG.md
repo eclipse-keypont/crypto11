@@ -68,6 +68,15 @@ was replaced, the config file was renamed, and the API surface was hardened afte
   is reproducible from the tagged source.
 - `make lint`, `make lint-fix`, `make notices`, `make version` Makefile targets.
 - `govulncheck` target and CI workflow.
+- Native Go **fuzz targets** for the token-parsing surface (`fuzz_test.go`): certificate DER out
+  of `CKA_VALUE`, EC points and parameters out of `CKA_EC_POINT` / `CKA_EC_PARAMS`, raw signatures
+  out of `C_Sign`, and the ML-KEM KDF encodings. They need no token, their seed corpora run under
+  `go test ./...`, and `make fuzz` (`FUZZTIME`, `FUZZ` to narrow) or the monthly `fuzz` workflow
+  runs the open-ended search.
+- `.env.template` and `crypto11.config.json.template`, the committed placeholders for local test
+  configuration. The real `.env`, `crypto11.config.json` and every `*.local` file are git-ignored.
+- `CONTRIBUTING.md`: provenance requirements (signed commits, DCO, ECA), how to run the checks and
+  the suite against a token, and the no-secrets rule for test configuration.
 
 ### Security
 
@@ -83,6 +92,9 @@ A dedicated audit found and fixed 7 issues:
 - **Low**: missing bounds checks and unknown-`paramSet` validation in the new ML-KEM code.
 - Ported an upstream fix (ThalesGroup PR #135): HMAC sessions were leaked on mid-operation error
   paths and could be returned to the pool twice; key-gen fallback broadened for SoftHSM/Utimaco.
+
+`SECURITY.md` documents how to report a vulnerability privately — GitHub private vulnerability
+reporting or the Eclipse Foundation security team — and which versions receive fixes.
 
 ### Fixed
 
@@ -105,7 +117,7 @@ A dedicated audit found and fixed 7 issues:
   `uint` is 8 everywhere. Reinterpreting the address of a 4-byte buffer as a `uint` read 4 bytes
   past it, so on Windows every `CK_ULONG` attribute — `CKA_KEY_TYPE`, `CKA_MODULUS_BITS`,
   `CKA_VALUE_LEN` — came back with garbage in its top half. Both conversions now come from the
-  binding as `cryptoki.ULongToBytes` / `cryptoki.BytesToULong` (pkcs11-go v1.1.0-rc1), which size
+  binding as `cryptoki.ULongToBytes` / `cryptoki.BytesToULong` (pkcs11-go v1.1.0), which size
   them from the C type itself: a short attribute is zero-extended, anything past one `CK_ULONG` is
   ignored, and encoding a value too large for the platform's `CK_ULONG` panics rather than silently
   truncating a mechanism parameter.
@@ -119,12 +131,21 @@ A dedicated audit found and fixed 7 issues:
   random, so roughly one certificate in 256 legitimately ends in a null byte and would be
   truncated — padded or not. Trailing bytes that are not null are still an error rather than
   something to discard silently.
+- RSA-PSS signing with `rsa.PSSSaltLengthAuto` now succeeds instead of returning
+  `errUnsupportedRSAOptions` ([#96](https://github.com/eclipse-keypont/crypto11/pull/96), by
+  [@maraino](https://github.com/maraino), whose calculation and worked example this follows). The
+  salt is resolved to the largest the modulus can carry — `(bits-1+7)/8 - hLen - 2`, the value
+  `crypto/rsa` picks — so the zero-valued `PSSOptions.SaltLength` that `crypto.Signer` callers
+  commonly pass produces a signature verifiers accept. Unlike #96, the arithmetic is done in `int`
+  and a modulus too small for the hash reports `rsa.ErrMessageTooLong` rather than wrapping to a
+  salt length near 2⁶⁴. `Auto` is still rejected when the key's public half is not an
+  `*rsa.PublicKey`, since there is no modulus to size the salt from.
 
 ### Changed
 
 - **crypto11 no longer contains any cgo of its own.** The `CK_ULONG` conversions were the last
   `import "C"` in the package; they now delegate to `cryptoki.ULongToBytes` / `cryptoki.BytesToULong`,
-  added in pkcs11-go v1.1.0-rc1 (which this release requires). The width of a `CK_ULONG` is a
+  added in pkcs11-go v1.1.0 (which this release requires). The width of a `CK_ULONG` is a
   property of the C ABI, so it belongs in the one package that holds the PKCS#11 headers — keeping a
   second copy here is what let it drift out of step on Windows.
 - RSA-PSS signing uses the binding's typed `CK_RSA_PKCS_PSS_PARAMS` (`NewPSSParams`) instead of
@@ -134,9 +155,28 @@ A dedicated audit found and fixed 7 issues:
 - Full `golangci-lint` cleanup: ineffassign, prealloc, unconvert, revive exported-comment/
   error-string findings, renamed `errNoCkaId` → `errNoCkaID`, removed deprecated `rand.Seed` calls.
 - Test suite hardened to skip gracefully rather than fail when a token doesn't support a given
-  mechanism (DSA, HMAC, PSS, etc.), avoid nil-pointer panics, and de-duplicate slot discovery.
+  mechanism (DSA, HMAC, PSS, etc.), tolerate pre-existing token objects, avoid nil-pointer panics,
+  and de-duplicate slot discovery. Integration testing moved to
+  [SoftHSMv3](https://github.com/pqctoday-org/pqctoday-hsm), which is what makes the PKCS#11 v3.2
+  and ML-KEM paths testable; SoftHSM2 and hardware tokens self-skip what they lack.
+- Test configuration is resolved from compiled-in defaults, then a git-ignored JSON file
+  (`crypto11.config.json.local`, `crypto11.config.json`, or `CRYPTO11_CONFIG_FILE`), then the
+  environment, and is never written back into the tree. `setup_test.go` used to write the module
+  path and PIN into a tracked `crypto11.config.json` and restore it only on a clean exit, so an
+  interrupted run left both one `git add -A` away from a commit; it now exports the names of its
+  ephemeral tokens as variables instead. Variables follow one rule — `PKCS11_*` says which token
+  to talk to, `CRYPTO11_*` controls the harness — and `CRYPTO11_PROVISION=0` skips the
+  `C_InitToken` provisioning for a module that is not a throwaway SoftHSM. With nothing configured,
+  `go test ./...` narrows to the fuzz targets and passes on a fresh clone.
 - Repository moved from `github.com/ThalesGroup/crypto11` to `github.com/eclipse-keypont/crypto11`
-  (Eclipse Foundation donation).
+  (Eclipse Foundation donation). SPDX license headers added, naming Thales Group and the Eclipse
+  Foundation KeyPont project maintainers as copyright holders — `LICENSE` likewise — and
+  `NOTICES.md` generated from the dependency graph.
+- `go.mod` follows the two-directive policy adopted on `master` in
+  [#137](https://github.com/eclipse-keypont/crypto11/issues/137): `go 1.25.0` is the minimum a
+  consumer needs — lowered from `go 1.26.1` in v1.7.0-rc1, since a library's `go` directive is a
+  floor imposed on every importer — and `toolchain go1.27.1` is what maintainers build and test
+  with. `.go-version` tracks the toolchain.
 
 ### CI/CD & supply chain
 
@@ -144,6 +184,7 @@ A dedicated audit found and fixed 7 issues:
   CodeQL, govulncheck, Gitleaks secret scanning, OpenSSF Scorecard, dependency review, and
   golangci-lint gate every push.
 - All third-party GitHub Actions pinned to commit SHAs.
+- Travis CI configuration removed; it was no longer in use.
 - Tagged releases now produce a signed, **SLSA level 3**-attested source archive
   (via [slsa-github-generator](https://github.com/slsa-framework/slsa-github-generator) and
   keyless [cosign](https://github.com/sigstore/cosign)) instead of being pushed unsigned — see
