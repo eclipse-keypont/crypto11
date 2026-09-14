@@ -1,5 +1,6 @@
 // SPDX-FileCopyrightText: 2017 Google Inc.
 // SPDX-FileCopyrightText: 2026 Thales Group
+// SPDX-FileCopyrightText: 2026 The Eclipse Foundation KeyPont project maintainers
 // SPDX-License-Identifier: Apache-2.0
 //
 // Vendored into crypto11 from github.com/thales-e-security/pool@v0.0.2, itself

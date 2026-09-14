@@ -1,14 +1,16 @@
 // SPDX-FileCopyrightText: 2017 Google Inc.
 // SPDX-FileCopyrightText: 2026 Thales Group
+// SPDX-FileCopyrightText: 2026 The Eclipse Foundation KeyPont project maintainers
 // SPDX-License-Identifier: Apache-2.0
 //
 // Vendored into crypto11 from github.com/thales-e-security/pool@v0.0.2, itself
 // extracted from vitess.io/vitess; see internal/pool/README.md for provenance.
-// Modified by Thales Group in 2026: reimplemented on top of Go's native typed
-// atomics (sync/atomic.Int64 / atomic.Bool). This removes the 64-bit alignment
-// footgun of the original hand-rolled version (which required atomic fields to be
-// manually placed first in a struct to avoid runtime panics on 32-bit platforms)
-// and drops the unused AtomicInt32 and AtomicString types.
+// Modified by Thales Group and the Eclipse Foundation KeyPont project maintainers
+// in 2026: reimplemented on top of Go's native typed atomics (sync/atomic.Int64 /
+// atomic.Bool). This removes the 64-bit alignment footgun of the original
+// hand-rolled version (which required atomic fields to be manually placed first
+// in a struct to avoid runtime panics on 32-bit platforms) and drops the unused
+// AtomicInt32 and AtomicString types.
 
 package pool
 

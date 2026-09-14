@@ -1,5 +1,6 @@
 <!--
 SPDX-FileCopyrightText: 2026 Thales Group and the crypto11 Contributors
+SPDX-FileCopyrightText: 2026 The Eclipse Foundation KeyPont project maintainers
 SPDX-License-Identifier: MIT
 -->
 
@@ -20,7 +21,7 @@ Report privately through either channel:
   — preferred. It keeps the report, the fix and the advisory in one place.
 - **The Eclipse Foundation security team**, at <security@eclipse-foundation.org>. See the
   [Eclipse Foundation Security Policy](https://www.eclipse.org/security/policy/) for the
-  Foundation-level process. This is the right channel if the issue spans several Eclipse Keypont
+  Foundation-level process. This is the right channel if the issue spans several Eclipse KeyPont
   projects, or if you would rather not report through GitHub.
 
 ### What to include

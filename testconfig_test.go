@@ -1,4 +1,5 @@
 // SPDX-FileCopyrightText: 2026 Thales Group and the crypto11 Contributors
+// SPDX-FileCopyrightText: 2026 The Eclipse Foundation KeyPont project maintainers
 // SPDX-License-Identifier: MIT
 
 package crypto11
@@ -61,7 +62,7 @@ func defaultTestConfig() *Config {
 //  1. compiled-in defaults (defaultTestConfig)
 //  2. a git-ignored JSON file (CRYPTO11_CONFIG_FILE, else the first of
 //     localConfigFiles that exists in dir)
-//  3. CRYPTO11_* environment variables
+//  3. PKCS11_* environment variables
 //
 // Environment last is what lets CI configure a run without writing anything
 // into the working tree, and keeps a developer's local file from having to be

@@ -1,4 +1,5 @@
 // SPDX-FileCopyrightText: 2026 Thales Group and the crypto11 Contributors
+// SPDX-FileCopyrightText: 2026 The Eclipse Foundation KeyPont project maintainers
 // SPDX-License-Identifier: MIT
 
 // Package crypto11 enables access to cryptographic keys from PKCS#11 using Go crypto API.

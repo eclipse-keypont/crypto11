@@ -1,4 +1,5 @@
 // SPDX-FileCopyrightText: 2026 Thales Group and the crypto11 Contributors
+// SPDX-FileCopyrightText: 2026 The Eclipse Foundation KeyPont project maintainers
 // SPDX-License-Identifier: MIT
 
 package crypto11
@@ -117,7 +118,7 @@ func limitToFuzzTargets() {
 
 // initSoftHSM3Token creates ephemeral SoftHSM tokens, initialises them
 // entirely through the PKCS#11 API (C_InitToken / C_InitPIN), exports the
-// CRYPTO11_* variables that resolveTestConfig reads, and returns a teardown
+// PKCS11_* variables that resolveTestConfig reads, and returns a teardown
 // function that removes the temp token directory.
 //
 // It deliberately writes no file into the working tree. An earlier version
