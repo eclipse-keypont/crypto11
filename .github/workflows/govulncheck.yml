@@ -1,4 +1,4 @@
-name: Vulnerability Scan
+name: Vulnerability Scan govulncheck
 
 # Scans this module and the reachable parts of its dependencies against the Go
 # vulnerability database. govulncheck is reachability-aware: it only reports
