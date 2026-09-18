@@ -117,7 +117,7 @@ reporting or the Eclipse Foundation security team — and which versions receive
   `uint` is 8 everywhere. Reinterpreting the address of a 4-byte buffer as a `uint` read 4 bytes
   past it, so on Windows every `CK_ULONG` attribute — `CKA_KEY_TYPE`, `CKA_MODULUS_BITS`,
   `CKA_VALUE_LEN` — came back with garbage in its top half. Both conversions now come from the
-  binding as `cryptoki.ULongToBytes` / `cryptoki.BytesToULong` (pkcs11-go v1.1.0), which size
+  binding as `cryptoki.ULongToBytes` / `cryptoki.BytesToULong` (pkcs11-go v1.1.1), which size
   them from the C type itself: a short attribute is zero-extended, anything past one `CK_ULONG` is
   ignored, and encoding a value too large for the platform's `CK_ULONG` panics rather than silently
   truncating a mechanism parameter.
@@ -145,9 +145,11 @@ reporting or the Eclipse Foundation security team — and which versions receive
 
 - **crypto11 no longer contains any cgo of its own.** The `CK_ULONG` conversions were the last
   `import "C"` in the package; they now delegate to `cryptoki.ULongToBytes` / `cryptoki.BytesToULong`,
-  added in pkcs11-go v1.1.0 (which this release requires). The width of a `CK_ULONG` is a
-  property of the C ABI, so it belongs in the one package that holds the PKCS#11 headers — keeping a
-  second copy here is what let it drift out of step on Windows.
+  added in pkcs11-go v1.1.0. This release requires v1.1.1, which also carries the binding's own
+  fixes for the Synapse security findings
+  ([eclipse-keypont/pkcs11-go#15](https://github.com/eclipse-keypont/pkcs11-go/pull/15)). The
+  width of a `CK_ULONG` is a property of the C ABI, so it belongs in the one package that holds the
+  PKCS#11 headers — keeping a second copy here is what let it drift out of step on Windows.
 - RSA-PSS signing uses the binding's typed `CK_RSA_PKCS_PSS_PARAMS` (`NewPSSParams`) instead of
   hand-packing three `CK_ULONG`s, matching how OAEP and GCM parameters were already built.
 - Internal resource pool (`internal/pool`) reimplemented on native `sync/atomic` typed values,
