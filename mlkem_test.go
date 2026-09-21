@@ -39,6 +39,29 @@ func TestMLKEM(t *testing.T) {
 	t.Run("FindByLabel", func(t *testing.T) { testMLKEMFindByLabel(t, ctx) })
 	t.Run("Delete", func(t *testing.T) { testMLKEMDelete(t, ctx) })
 	t.Run("OtherFindersStillWork", func(t *testing.T) { testMLKEMOtherFindersStillWork(t, ctx) })
+	t.Run("NonExtractableSecretIsAnError", func(t *testing.T) { testMLKEMNonExtractableSecret(t, ctx) })
+}
+
+// A shared secret derived as sensitive and non-extractable stays on the token;
+// asking for its bytes must be an error, never a silently empty slice that a
+// caller would go on to feed to a KDF as if it were the KEM result.
+func testMLKEMNonExtractableSecret(t *testing.T, ctx *Context) {
+	t.Helper()
+	key, err := ctx.GenerateMLKEMKeyPair(randomBytes(), MLKEM768)
+	require.NoError(t, err)
+	defer func() { _ = key.Delete() }()
+
+	ssTemplate := mlkemSharedSecretTemplate()
+	require.NoError(t, ssTemplate.Set(CkaExtractable, false))
+	require.NoError(t, ssTemplate.Set(CkaSensitive, true))
+
+	_, ss, err := key.Encapsulate(ssTemplate)
+	require.NoError(t, err)
+	defer func() { _ = ss.Delete() }()
+
+	raw, err := ss.Bytes()
+	require.Error(t, err)
+	require.Empty(t, raw)
 }
 
 func testMLKEMGenerate(t *testing.T, ctx *Context, paramSet MLKEMParameterSet) {

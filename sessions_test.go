@@ -7,9 +7,12 @@ package crypto11
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"testing"
 	"time"
 
+	pkcs11 "github.com/eclipse-keypont/pkcs11-go/cryptoki"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -137,4 +140,100 @@ func TestContextPoolStats(t *testing.T) {
 	closed := ctx.PoolStats()
 	assert.Equal(t, int64(0), closed.Capacity, "Close drains the pool")
 	assert.Equal(t, before.MaxCapacity, closed.MaxCapacity, "but does not forget how big it was")
+}
+
+func TestSessionFatal(t *testing.T) {
+	fatal := []uint{
+		pkcs11.CKR_SESSION_HANDLE_INVALID, pkcs11.CKR_SESSION_CLOSED, pkcs11.CKR_DEVICE_ERROR,
+		pkcs11.CKR_DEVICE_REMOVED, pkcs11.CKR_TOKEN_NOT_PRESENT, pkcs11.CKR_GENERAL_ERROR,
+		pkcs11.CKR_OPERATION_ACTIVE,
+	}
+	for _, code := range fatal {
+		assert.True(t, sessionFatal(pkcs11.Error(code)), "%v must discard the session", pkcs11.Error(code))
+		// Wrapped errors are unwrapped.
+		assert.True(t, sessionFatal(fmt.Errorf("op: %w", pkcs11.Error(code))))
+	}
+
+	benign := []uint{
+		pkcs11.CKR_PIN_INCORRECT, pkcs11.CKR_MECHANISM_INVALID, pkcs11.CKR_KEY_HANDLE_INVALID,
+		pkcs11.CKR_USER_NOT_LOGGED_IN, pkcs11.CKR_TEMPLATE_INCONSISTENT, pkcs11.CKR_OBJECT_HANDLE_INVALID,
+	}
+	for _, code := range benign {
+		assert.False(t, sessionFatal(pkcs11.Error(code)), "%v must keep the session", pkcs11.Error(code))
+	}
+	assert.False(t, sessionFatal(nil))
+	assert.False(t, sessionFatal(errors.New("not a pkcs11 error")))
+}
+
+func TestPoisonedSessionIsReplaced(t *testing.T) {
+	// MaxSessions=2 leaves exactly one pooled session, so an operation after the
+	// poisoning has no other session to draw: it either recovers or it does not.
+	cfg := testConfig(t)
+	cfg.MaxSessions = 2
+	ctx, err := Configure(cfg)
+	require.NoError(t, err)
+	defer ctx.Close()
+
+	// Kill the pooled session behind the pool's back, then hand it back as if
+	// nothing had happened — the state a CKR_DEVICE_ERROR or a token reset leaves
+	// behind.
+	s, err := ctx.getSession()
+	require.NoError(t, err)
+	require.NoError(t, s.ctx.CloseSession(s.handle))
+	ctx.putSession(s, nil)
+
+	_, err = ctx.FindKeys(randomBytes(), nil)
+	require.Error(t, err, "the dead session must surface an error once")
+	var p11Err pkcs11.Error
+	require.True(t, errors.As(err, &p11Err))
+	assert.Equal(t, pkcs11.Error(pkcs11.CKR_SESSION_HANDLE_INVALID), p11Err)
+
+	// The pool must have replaced it: without putSession this call would fail
+	// with CKR_SESSION_HANDLE_INVALID forever.
+	_, err = ctx.FindKeys(randomBytes(), nil)
+	require.NoError(t, err, "a fresh session must have replaced the dead one")
+}
+
+func TestCloseWaitsForOperationsInFlight(t *testing.T) {
+	// An operation holds a session; Close must not tear the module down
+	// underneath it, and must not return until it has finished.
+	cfg := testConfig(t)
+	cfg.MaxSessions = 3
+	ctx, err := Configure(cfg)
+	require.NoError(t, err)
+
+	s, err := ctx.getSession()
+	require.NoError(t, err)
+
+	closed := make(chan error, 1)
+	go func() { closed <- ctx.Close() }()
+
+	select {
+	case err := <-closed:
+		t.Fatalf("Close returned (%v) while an operation still held a session", err)
+	case <-time.After(200 * time.Millisecond):
+	}
+
+	// New operations are refused rather than admitted behind a pending Close.
+	// (They block until Close completes, then see the closed Context.)
+	refused := make(chan error, 1)
+	go func() {
+		_, err := ctx.FindKeys(randomBytes(), nil)
+		refused <- err
+	}()
+
+	ctx.putSession(s, nil)
+
+	select {
+	case err := <-closed:
+		require.NoError(t, err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("Close did not return after the operation released its session")
+	}
+	select {
+	case err := <-refused:
+		require.Error(t, err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("operation queued behind Close never returned")
+	}
 }

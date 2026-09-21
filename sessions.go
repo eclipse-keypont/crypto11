@@ -28,19 +28,72 @@ func (s pkcs11Session) Close() {
 }
 
 // withSession executes a function with a session.
-func (c *Context) withSession(f func(session *pkcs11Session) error) error {
+func (c *Context) withSession(f func(session *pkcs11Session) error) (err error) {
 	session, err := c.getSession()
 	if err != nil {
 		return err
 	}
-	defer c.pool.Put(session)
+	defer func() { c.putSession(session, err) }()
 
 	return f(session)
 }
 
+// putSession returns a session to the pool once an operation on it has finished
+// with err, and releases the read lock getSession took. A session the token has
+// declared dead is closed and replaced instead of being handed to the next
+// caller: returning it would make every operation that happens to draw it fail
+// the same way, long after the fault that killed it.
+func (c *Context) putSession(session *pkcs11Session, err error) {
+	defer c.ops.RUnlock()
+	if sessionFatal(err) {
+		session.Close()
+		// A nil resource tells the pool to open a fresh session in its place.
+		c.pool.Put(nil)
+		return
+	}
+	c.pool.Put(session)
+}
+
+// sessionFatal reports whether err says the session it came from — or the token
+// behind it — can no longer be used. The list is deliberately narrow: an error
+// about the request (a bad mechanism, a wrong key, an invalid PIN) leaves the
+// session perfectly usable, and recycling on those would just cost a C_OpenSession
+// per failed call.
+func sessionFatal(err error) bool {
+	var p11Err pkcs11.Error
+	if !errors.As(err, &p11Err) {
+		return false
+	}
+	switch p11Err {
+	case pkcs11.CKR_SESSION_HANDLE_INVALID,
+		pkcs11.CKR_SESSION_CLOSED,
+		pkcs11.CKR_DEVICE_ERROR,
+		pkcs11.CKR_DEVICE_REMOVED,
+		pkcs11.CKR_TOKEN_NOT_PRESENT,
+		pkcs11.CKR_GENERAL_ERROR,
+		// A stuck multi-part operation: C_*Init keeps failing on this session
+		// until it is closed, and nothing we can call from here unsticks it.
+		pkcs11.CKR_OPERATION_ACTIVE:
+		return true
+	}
+	return false
+}
+
 // getSession retrieves a session from the pool, respecting the timeout defined in the Context config.
-// Callers are responsible for putting this session back in the pool.
+// Callers are responsible for handing this session back through putSession.
+//
+// The session comes with the Context's read lock held: from here until putSession, Close cannot
+// run. That is what makes "is the Context still open?" and "take a session" one step rather than
+// two — a check-then-act that Close could otherwise slip between.
 func (c *Context) getSession() (*pkcs11Session, error) {
+	c.ops.RLock()
+	if c.closed.Get() {
+		c.ops.RUnlock()
+		// We don't use errClosed to ensure our tests identify functions that aren't checking for closure
+		// correctly.
+		return nil, errors.New("context is closed")
+	}
+
 	ctx := context.Background()
 
 	if c.cfg.PoolWaitTimeout > 0 {
@@ -52,11 +105,11 @@ func (c *Context) getSession() (*pkcs11Session, error) {
 	resource, err := c.pool.Get(ctx)
 	if errors.Is(err, pool.ErrClosed) {
 		// Our Context must have been closed, return a nicer error.
-		// We don't use errClosed to ensure our tests identify functions that aren't checking for closure
-		// correctly.
+		c.ops.RUnlock()
 		return nil, errors.New("context is closed")
 	}
 	if err != nil {
+		c.ops.RUnlock()
 		return nil, err
 	}
 

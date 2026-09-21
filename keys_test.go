@@ -359,3 +359,109 @@ func TestGettingUnsupportedKeyTypeAttributes(t *testing.T) {
 		require.Error(t, err)
 	})
 }
+
+func TestAttributeAccessorsRejectForeignContext(t *testing.T) {
+	// Two Contexts on the same token, so the handle would in fact resolve on
+	// the other one — the accessor must refuse on principle, not by luck of
+	// the handle being invalid there.
+	ctx1 := testContext(t)
+	defer ctx1.Close()
+	ctx2 := testContext(t)
+	defer ctx2.Close()
+
+	key, err := ctx1.GenerateRSAKeyPair(randomBytes(), rsaSize)
+	require.NoError(t, err)
+	defer func(k Signer) { _ = k.Delete() }(key)
+
+	_, err = ctx2.GetAttributes(key, []AttributeType{CkaModulus})
+	require.ErrorIs(t, err, errForeignKey)
+	_, err = ctx2.GetAttribute(key, CkaModulus)
+	require.ErrorIs(t, err, errForeignKey)
+	_, err = ctx2.GetPubAttributes(key, []AttributeType{CkaModulusBits})
+	require.ErrorIs(t, err, errForeignKey)
+	_, err = ctx2.GetPubAttribute(key, CkaModulusBits)
+	require.ErrorIs(t, err, errForeignKey)
+
+	secret, err := ctx1.GenerateSecretKey(randomBytes(), 256, CipherAES)
+	require.NoError(t, err)
+	defer func(k *SecretKey) { _ = k.Delete() }(secret)
+	_, err = ctx2.GetAttributes(secret, []AttributeType{CkaValueLen})
+	require.ErrorIs(t, err, errForeignKey)
+
+	// The owning Context is unaffected.
+	_, err = ctx1.GetAttributes(key, []AttributeType{CkaModulus})
+	require.NoError(t, err)
+}
+
+// destroyPrivateKeysWithLabel removes private keys the finders deliberately no longer return.
+func destroyPrivateKeysWithLabel(t *testing.T, ctx *Context, label []byte) {
+	t.Helper()
+	err := ctx.withSession(func(session *pkcs11Session) error {
+		handles, err := findKeys(session, nil, label, uintPtr(pkcs11.CKO_PRIVATE_KEY), nil)
+		if err != nil {
+			return err
+		}
+		for _, h := range handles {
+			if err := session.ctx.DestroyObject(session.handle, h); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	require.NoError(t, err)
+}
+
+func TestLabelOnlyPrivateKeyIsNotPairedWithStranger(t *testing.T) {
+	withContext(t, func(ctx *Context) {
+		// A bystander key pair: the "first RSA public key on the token" the old
+		// fallback would have grabbed.
+		stranger, err := ctx.GenerateRSAKeyPair(randomBytes(), rsaSize)
+		require.NoError(t, err)
+		defer func(k Signer) { _ = k.Delete() }(stranger)
+
+		// A private key with a label but no CKA_ID, whose public half carries a
+		// different label and an id — nothing links the two by label or id.
+		orphanLabel := []byte("orphan-" + string(randomBytes()))
+		public := NewAttributeSet()
+		require.NoError(t, public.Set(CkaId, randomBytes()))
+		require.NoError(t, public.Set(CkaLabel, []byte("pub-of-"+string(orphanLabel))))
+		private := NewAttributeSet()
+		require.NoError(t, private.Set(CkaLabel, orphanLabel))
+		orphan, err := ctx.GenerateRSAKeyPairWithAttributes(public, private, rsaSize)
+		require.NoError(t, err)
+		defer destroyPrivateKeysWithLabel(t, ctx, orphanLabel)
+		defer func(k Signer) { _ = k.Delete() }(orphan)
+
+		// The finders must not manufacture a Signer out of the orphan and a
+		// public key that is not its own.
+		found, err := ctx.FindKeyPairs(nil, orphanLabel)
+		require.NoError(t, err)
+		require.Empty(t, found, "a label-only private key without a matching public half must not be returned")
+
+		_, err = ctx.FindKeyPair(nil, orphanLabel)
+		require.Error(t, err)
+
+		// Enumeration skips it rather than failing.
+		_, err = ctx.FindAllKeyPairs()
+		require.NoError(t, err)
+	})
+}
+
+func TestLabelOnlyKeyPairWithMatchingLabelsStillFound(t *testing.T) {
+	// The fix must not break the legitimate label-only case: both halves share
+	// a label and neither has an id.
+	withContext(t, func(ctx *Context) {
+		label := []byte("pair-" + string(randomBytes()))
+		public := NewAttributeSet()
+		require.NoError(t, public.Set(CkaLabel, label))
+		private := NewAttributeSet()
+		require.NoError(t, private.Set(CkaLabel, label))
+		key, err := ctx.GenerateRSAKeyPairWithAttributes(public, private, rsaSize)
+		require.NoError(t, err)
+		defer func(k Signer) { _ = k.Delete() }(key)
+
+		found, err := ctx.FindKeyPair(nil, label)
+		require.NoError(t, err)
+		require.Equal(t, key.Public(), found.Public())
+	})
+}

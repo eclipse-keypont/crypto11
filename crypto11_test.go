@@ -5,9 +5,13 @@
 package crypto11
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math/rand"
+	"os"
+	"path/filepath"
+	"runtime"
 	"testing"
 
 	pkcs11 "github.com/eclipse-keypont/pkcs11-go/cryptoki"
@@ -252,4 +256,191 @@ func TestInvalidMaxSessions(t *testing.T) {
 	cfg.MaxSessions = 1
 	_, err := Configure(cfg)
 	require.Error(t, err)
+}
+
+func TestEffectiveMaxSessions(t *testing.T) {
+	cases := []struct {
+		name       string
+		configured int
+		tokenMax   uint
+		want       int
+		wantErr    bool
+	}{
+		{"token reports infinite", 1024, pkcs11.CK_EFFECTIVELY_INFINITE, 1024, false},
+		{"token reports unavailable", 1024, pkcs11.CK_UNAVAILABLE_INFORMATION, 1024, false},
+		{"token lower than config", 1024, 10, 10, false},
+		{"config lower than token", 5, 10, 5, false},
+		{"exactly two", 1024, 2, 2, false},
+		{"token allows one session", 1024, 1, 0, true},
+		{"config of two, token of one", 2, 1, 0, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := effectiveMaxSessions(tc.configured, tc.tokenMax)
+			if tc.wantErr {
+				require.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, got)
+		})
+	}
+}
+
+func TestLoginUserType(t *testing.T) {
+	ut, err := loginUserType(DefaultUserType)
+	require.NoError(t, err)
+	assert.Equal(t, uint(pkcs11.CKU_USER), ut)
+
+	ut, err = loginUserType(CryptoUser)
+	require.NoError(t, err)
+	assert.Equal(t, uint(CryptoUser), ut)
+
+	for _, bad := range []int{0, 2, 3, 42, -1} {
+		_, err = loginUserType(bad)
+		assert.Error(t, err, "UserType %d must be rejected", bad)
+	}
+}
+
+func TestUnsupportedUserTypeRejectedBeforeModuleLoad(t *testing.T) {
+	// A bogus module path proves the user type is checked first: had Configure
+	// reached openModule, the error would be about the library, not the user type.
+	cfg := &Config{Path: "/nonexistent/crypto11-test.so", TokenLabel: "x", UserType: 42}
+	_, err := Configure(cfg)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "unsupported UserType 42")
+}
+
+func TestInvalidPinReleasesPersistentSession(t *testing.T) {
+	// Like TestInvalidPinDoesntDestroyLibrary this needs "token1" and "token2":
+	// ctx1 keeps the module loaded so a failed Configure on token2 cannot rely
+	// on C_Finalize to sweep up the persistent session it opened before C_Login
+	// failed. It must close that session itself, or every retry leaks one.
+	cfg := testConfig(t)
+	cfg.TokenLabel = "token1"
+
+	cfgWrongPin := testConfig(t)
+	cfgWrongPin.Pin = "this_should_be_wrong_pin"
+	cfgWrongPin.TokenLabel = "token2"
+
+	ctx1, err := Configure(cfg)
+	if errors.Is(err, errTokenNotFound) {
+		t.Skip("tokens 'token1'/'token2' not found; set PKCS11_MODULE to auto-provision")
+	}
+	require.NoError(t, err)
+	defer ctx1.Close()
+
+	slots, err := ctx1.ctx.GetSlotList(true)
+	require.NoError(t, err)
+	slot, info, err := ctx1.findToken(slots, "", "token2", nil)
+	require.NoError(t, err)
+	before := info.RwSessionCount
+
+	const attempts = 5
+	for i := 0; i < attempts; i++ {
+		_, err = Configure(cfgWrongPin)
+		require.Error(t, err)
+	}
+
+	info2, err := ctx1.ctx.GetTokenInfo(slot)
+	require.NoError(t, err)
+	if before == pkcs11.CK_UNAVAILABLE_INFORMATION || info2.RwSessionCount == pkcs11.CK_UNAVAILABLE_INFORMATION {
+		t.Log("token does not report session counts; leak check limited to 'a later Configure still works'")
+	} else {
+		assert.Equal(t, before, info2.RwSessionCount,
+			"%d failed logins must not leave sessions open on token2", attempts)
+	}
+
+	// And the token is still usable afterwards.
+	cfgGood := testConfig(t)
+	cfgGood.TokenLabel = "token2"
+	ctx2, err := Configure(cfgGood)
+	require.NoError(t, err)
+	require.NoError(t, ctx2.Close())
+}
+
+func TestModuleCloseReportsRefcountDrift(t *testing.T) {
+	ctx := testContext(t)
+	defer ctx.Close()
+
+	// A moduleCtx that is not what the cache holds under its path: the old
+	// code panicked here, and there is no reason a library should.
+	stray := moduleCtx{Ctx: ctx.ctx.Ctx, path: "/not/the/registered/path.so"}
+	require.ErrorIs(t, stray.Close(), errModuleRefCount)
+
+	// The real reference is untouched by the failed attempt.
+	_, err := ctx.FindKeys(randomBytes(), nil)
+	require.NoError(t, err)
+}
+
+func TestPinFuncSuppliesAndWipesThePin(t *testing.T) {
+	cfg := testConfig(t)
+	realPin := cfg.Pin
+	cfg.Pin = ""
+
+	var handed []byte
+	calls := 0
+	cfg.PinFunc = func() ([]byte, error) {
+		calls++
+		handed = []byte(realPin)
+		return handed, nil
+	}
+
+	ctx, err := Configure(cfg)
+	require.NoError(t, err)
+	defer ctx.Close()
+
+	assert.Equal(t, 1, calls)
+	assert.Equal(t, make([]byte, len(realPin)), handed, "the slice PinFunc returned must have been wiped")
+	assert.Nil(t, ctx.cfg.PinFunc, "the function must not be retained")
+	assert.NotNil(t, cfg.PinFunc, "the caller's Config is untouched")
+
+	_, err = ctx.FindKeys(randomBytes(), nil)
+	require.NoError(t, err, "the login worked")
+}
+
+func TestPinFuncErrorFailsConfigure(t *testing.T) {
+	cfg := testConfig(t)
+	cfg.Pin = ""
+	boom := errors.New("secret store unavailable")
+	cfg.PinFunc = func() ([]byte, error) { return nil, boom }
+
+	_, err := Configure(cfg)
+	require.ErrorIs(t, err, boom)
+
+	// And nothing was left half-open: the token is configurable afterwards.
+	ctx := testContext(t)
+	require.NoError(t, ctx.Close())
+}
+
+func TestConfigureFromFileRefusesSharedPinFile(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("file modes are not checked on Windows")
+	}
+	cfg := testConfig(t)
+	require.NotEmpty(t, cfg.Pin, "this test needs a PIN in the test configuration")
+	data, err := json.Marshal(cfg)
+	require.NoError(t, err)
+
+	path := filepath.Join(t.TempDir(), "crypto11.config.json")
+	require.NoError(t, os.WriteFile(path, data, 0o644))
+
+	_, err = ConfigureFromFile(path)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "readable by other users")
+
+	require.NoError(t, os.Chmod(path, 0o600))
+	ctx, err := ConfigureFromFile(path)
+	require.NoError(t, err)
+	require.NoError(t, ctx.Close())
+
+	// A file without a PIN in it is not a credential and is not policed.
+	cfg.Pin = ""
+	cfg.LoginNotSupported = true
+	data, err = json.Marshal(cfg)
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(path, data, 0o644))
+	ctx, err = ConfigureFromFile(path)
+	require.NoError(t, err)
+	require.NoError(t, ctx.Close())
 }

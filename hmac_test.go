@@ -9,9 +9,13 @@ import (
 	"errors"
 	"sync"
 	"testing"
+	"time"
 
 	pkcs11 "github.com/eclipse-keypont/pkcs11-go/cryptoki"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/eclipse-keypont/crypto11/v2/internal/pool"
 )
 
 func TestHmac(t *testing.T) {
@@ -257,4 +261,77 @@ func testHmac(t *testing.T, ctx *Context, keyLabel string, keytype int, mech int
 			h1.Sum([]byte{})
 		})
 	}
+}
+
+func TestCheckMACLength(t *testing.T) {
+	require.NoError(t, checkMACLength(make([]byte, 32), 32))
+	require.Error(t, checkMACLength(nil, 32), "empty MAC")
+	require.Error(t, checkMACLength(make([]byte, 31), 32), "truncated MAC")
+	require.Error(t, checkMACLength(make([]byte, 33), 32), "oversized MAC")
+	// Unknown mechanism, no length given: only emptiness can be checked.
+	require.NoError(t, checkMACLength(make([]byte, 7), 0))
+	require.Error(t, checkMACLength(nil, 0))
+}
+
+func TestHmacInfoSizesMatchDigests(t *testing.T) {
+	// The table is what Sum validates token output against, so an entry that
+	// is wrong (MD5 was listed at 20 bytes) would reject every correct MAC.
+	assert.Equal(t, 16, hmacInfos[pkcs11.CKM_MD5_HMAC].size)
+	assert.Equal(t, 20, hmacInfos[pkcs11.CKM_SHA_1_HMAC].size)
+	assert.Equal(t, 28, hmacInfos[pkcs11.CKM_SHA224_HMAC].size)
+	assert.Equal(t, 32, hmacInfos[pkcs11.CKM_SHA256_HMAC].size)
+	assert.Equal(t, 48, hmacInfos[pkcs11.CKM_SHA384_HMAC].size)
+	assert.Equal(t, 64, hmacInfos[pkcs11.CKM_SHA512_HMAC].size)
+}
+
+func TestHmacResetAfterDeadOperationDoesNotPanic(t *testing.T) {
+	// Reset used to call Sum unconditionally; on a hash whose operation had
+	// already died that panicked instead of trying to start over.
+	closed := pool.NewResourcePool(func() (pool.Resource, error) { return nil, errors.New("unused") }, 1, 1, 0, 0)
+	closed.Close()
+	ctx := &Context{cfg: &Config{}, pool: closed}
+	hi := &hmacImplementation{key: &SecretKey{pkcs11Object: pkcs11Object{context: ctx}}}
+	// initialize fails (closed pool) — Reset must swallow that, as documented,
+	// and leave the hash dead rather than panicking on the way in.
+	require.NotPanics(t, func() { hi.Reset() })
+	_, err := hi.Write([]byte("x"))
+	require.Equal(t, errHmacClosed, err)
+}
+
+func TestHmacResetFailureDoesNotReplayPreviousMAC(t *testing.T) {
+	// A pool of exactly one session, with a short wait, lets the test make the
+	// reinitialization inside Reset fail deterministically by holding that one
+	// session elsewhere.
+	cfg := testConfig(t)
+	cfg.MaxSessions = 2
+	cfg.PoolWaitTimeout = 200 * time.Millisecond
+	ctx, err := Configure(cfg)
+	require.NoError(t, err)
+	defer ctx.Close()
+
+	skipIfMechUnsupported(t, ctx, pkcs11.CKM_SHA256_HMAC)
+	key, found, err := findKeyOrCreate(ctx, "hmac0", pkcs11.CKK_SHA256_HMAC, 256)
+	require.NoError(t, err)
+	if !found {
+		defer key.Delete()
+	}
+
+	h, err := key.NewHMAC(pkcs11.CKM_SHA256_HMAC, 0)
+	require.NoError(t, err)
+	_, err = h.Write([]byte("first message"))
+	require.NoError(t, err)
+	first := h.Sum(nil)
+	require.Len(t, first, 32)
+
+	// Starve the pool, then Reset: the new session cannot be obtained.
+	held, err := ctx.getSession()
+	require.NoError(t, err)
+	h.Reset()
+	ctx.putSession(held, nil)
+
+	// The hash is dead. It must say so — not hand back the MAC of "first
+	// message" as if it were the MAC of whatever comes next.
+	_, err = h.Write([]byte("second message"))
+	require.Equal(t, errHmacClosed, err)
+	require.Panics(t, func() { h.Sum(nil) })
 }

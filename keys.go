@@ -7,10 +7,10 @@ package crypto11
 import (
 	"crypto"
 	"crypto/x509"
+	"errors"
 	"fmt"
 
 	pkcs11 "github.com/eclipse-keypont/pkcs11-go/cryptoki"
-	"github.com/pkg/errors"
 )
 
 const maxHandlePerFind = 20
@@ -20,6 +20,11 @@ var errNoCkaID = errors.New("private key has no CKA_ID")
 
 // errNoPublicHalf is returned if a public half cannot be found to match a given private key
 var errNoPublicHalf = errors.New("could not find public key to match private key")
+
+// errForeignKey is returned when a key created or found through one Context is handed to
+// another. An object handle is only meaningful within the module that issued it; used against a
+// different Context it can resolve, on that token, to an unrelated object.
+var errForeignKey = errors.New("key belongs to a different Context")
 
 // errUnsupportedKeyType is returned if a key object's CKA_KEY_TYPE is not one this package can
 // represent. Enumeration functions skip such objects instead of failing, so that a single key of
@@ -150,9 +155,18 @@ func (c *Context) getKeyPair(session *pkcs11Session, privHandle *pkcs11.ObjectHa
 		}
 	}
 
-	if pubHandle == nil {
-		// Try harder to find a matching public key, based on CKA_ID alone
+	if pubHandle == nil && len(id) > 0 {
+		// Try harder to find a matching public key, based on CKA_ID alone.
+		//
+		// Only when there is an id to match on: findKeys leaves an empty id and
+		// label out of the template, so for a label-only private key this search
+		// would return the first public key of the right type on the token —
+		// some unrelated key pair's public half — and the Signer built from it
+		// would advertise an identity it cannot sign for.
 		pubHandle, err = findKey(session, id, nil, uintPtr(pkcs11.CKO_PUBLIC_KEY), &keyType)
+		if err != nil {
+			return nil, 0, nil, nil, nil, err
+		}
 	}
 
 	priv = &pkcs11PrivateKey{
@@ -162,7 +176,12 @@ func (c *Context) getKeyPair(session *pkcs11Session, privHandle *pkcs11.ObjectHa
 		},
 	}
 
-	certificate, _ = findCertificate(session, id, nil, nil)
+	// The same holds for the certificate fallback: CKA_ID is what links a
+	// certificate to its key, and an empty one would match every certificate
+	// on the token that has none.
+	if len(id) > 0 {
+		certificate, _ = findCertificate(session, id, nil, nil)
+	}
 	if certificate != nil && pubHandle == nil {
 		pub = certificate.PublicKey
 	}
@@ -330,7 +349,7 @@ func (c *Context) FindKeyPairsWithAttributes(attributes AttributeSet) (signer []
 	var keys []Signer
 
 	if _, ok := attributes[CkaClass]; ok {
-		return nil, errors.Errorf("keypair attribute set must not contain CkaClass")
+		return nil, errors.New("keypair attribute set must not contain CkaClass")
 	}
 
 	err = c.withSession(func(session *pkcs11Session) error {
@@ -473,7 +492,7 @@ func (c *Context) FindKeysWithAttributes(attributes AttributeSet) ([]*SecretKey,
 	var keys []*SecretKey
 
 	if _, ok := attributes[CkaClass]; ok {
-		return nil, errors.Errorf("key attribute set must not contain CkaClass")
+		return nil, errors.New("key attribute set must not contain CkaClass")
 	}
 
 	err := c.withSession(func(session *pkcs11Session) error {
@@ -640,7 +659,7 @@ func (c *Context) FindPrivateKeysWithAttributes(attributes AttributeSet) (signer
 	var keys []PrivateKey
 
 	if _, ok := attributes[CkaClass]; ok {
-		return nil, errors.Errorf("keypair attribute set must not contain CkaClass")
+		return nil, errors.New("keypair attribute set must not contain CkaClass")
 	}
 
 	err = c.withSession(func(session *pkcs11Session) error {
@@ -712,20 +731,24 @@ func (c *Context) GetAttributes(key interface{}, attributes []AttributeType) (a 
 	}
 
 	var handle pkcs11.ObjectHandle
+	var owner *Context
 
 	switch k := (key).(type) {
 	case *pkcs11PrivateKeyDSA:
-		handle = k.handle
+		handle, owner = k.handle, k.context
 	case *pkcs11PrivateKeyRSA:
-		handle = k.handle
+		handle, owner = k.handle, k.context
 	case *pkcs11PrivateKeyECDSA:
-		handle = k.handle
+		handle, owner = k.handle, k.context
 	case *pkcs11MLKEMKeyPair:
-		handle = k.handle
+		handle, owner = k.handle, k.context
 	case *SecretKey:
-		handle = k.handle
+		handle, owner = k.handle, k.context
 	default:
-		return nil, errors.Errorf("not a PKCS#11 key")
+		return nil, errors.New("not a PKCS#11 key")
+	}
+	if owner != c {
+		return nil, errForeignKey
 	}
 
 	return c.getAttributes(handle, attributes)
@@ -757,18 +780,22 @@ func (c *Context) GetPubAttributes(key interface{}, attributes []AttributeType) 
 	}
 
 	var handle pkcs11.ObjectHandle
+	var owner *Context
 
 	switch k := (key).(type) {
 	case *pkcs11PrivateKeyDSA:
-		handle = k.pubKeyHandle
+		handle, owner = k.pubKeyHandle, k.context
 	case *pkcs11PrivateKeyRSA:
-		handle = k.pubKeyHandle
+		handle, owner = k.pubKeyHandle, k.context
 	case *pkcs11PrivateKeyECDSA:
-		handle = k.pubKeyHandle
+		handle, owner = k.pubKeyHandle, k.context
 	case *pkcs11MLKEMKeyPair:
-		handle = k.pubKeyHandle
+		handle, owner = k.pubKeyHandle, k.context
 	default:
-		return nil, errors.Errorf("not an asymmetric PKCS#11 key")
+		return nil, errors.New("not an asymmetric PKCS#11 key")
+	}
+	if owner != c {
+		return nil, errForeignKey
 	}
 
 	return c.getAttributes(handle, attributes)

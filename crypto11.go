@@ -76,16 +76,17 @@ package crypto11
 import (
 	"crypto"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
 
 	pkcs11 "github.com/eclipse-keypont/pkcs11-go/cryptoki"
-	"github.com/pkg/errors"
 
 	"github.com/eclipse-keypont/crypto11/v2/internal/pool"
 )
@@ -123,8 +124,10 @@ type pkcs11Object struct {
 
 func (o *pkcs11Object) Delete() error {
 	err := o.context.withSession(func(session *pkcs11Session) error {
-		err := session.ctx.DestroyObject(session.handle, o.handle)
-		return errors.WithMessage(err, "failed to destroy key")
+		if err := session.ctx.DestroyObject(session.handle, o.handle); err != nil {
+			return fmt.Errorf("failed to destroy key: %w", err)
+		}
+		return nil
 	})
 	if err == nil {
 		o.handle = pkcs11.CK_INVALID_HANDLE
@@ -152,8 +155,10 @@ func (k *pkcs11PrivateKey) Delete() error {
 	}
 
 	err = k.context.withSession(func(session *pkcs11Session) error {
-		err := session.ctx.DestroyObject(session.handle, k.pubKeyHandle)
-		return errors.WithMessage(err, "failed to destroy public key")
+		if err := session.ctx.DestroyObject(session.handle, k.pubKeyHandle); err != nil {
+			return fmt.Errorf("failed to destroy public key: %w", err)
+		}
+		return nil
 	})
 	if err == nil {
 		k.pubKeyHandle = pkcs11.CK_INVALID_HANDLE
@@ -171,6 +176,12 @@ type Context struct {
 
 	// closeOnce makes Close idempotent.
 	closeOnce sync.Once
+
+	// ops is held for reading by every operation for as long as it holds a
+	// session out of the pool — getSession to putSession — and for writing by
+	// Close. Close therefore waits for operations in flight, and no operation
+	// can start between Close deciding to tear down and the teardown.
+	ops sync.RWMutex
 
 	ctx moduleCtx
 	cfg *Config
@@ -193,6 +204,12 @@ type Signer interface {
 	crypto.Signer
 
 	// Delete deletes the key pair from the token.
+	//
+	// Delete must not run concurrently with another operation on the same
+	// key. Once it has returned, any further use of the key fails with an
+	// invalid-handle error; an operation already in flight when the objects
+	// are destroyed may fail, or — if the token has recycled the handle for
+	// a new object by then — complete against that object instead.
 	Delete() error
 }
 
@@ -273,7 +290,19 @@ type Config struct {
 	SlotNumber *int
 
 	// User PIN (password).
+	//
+	// A Go string cannot be wiped, so a PIN given here stays in process memory
+	// until the garbage collector happens to reclaim it, however briefly
+	// Configure needed it. Prefer PinFunc when the PIN can be fetched on
+	// demand.
 	Pin string
+
+	// PinFunc, when set, supplies the PIN instead of Pin. It is called once,
+	// from Configure, and the slice it returns is wiped as soon as C_Login has
+	// run — so a caller can read the PIN from a secret store, a file or the
+	// environment at that moment and keep no copy of its own. Configure does
+	// not retain the function. It is ignored when LoginNotSupported is set.
+	PinFunc func() ([]byte, error) `json:"-"`
 
 	// Maximum number of concurrent sessions to open. If zero, DefaultMaxSessions is used.
 	// Otherwise, the value specified must be at least 2.
@@ -350,7 +379,7 @@ func openModule(path string) (moduleCtx, error) {
 
 	ctx, err := pkcs11.New(absPath)
 	if err != nil {
-		return moduleCtx{}, errors.WithMessage(err, "failed to open module")
+		return moduleCtx{}, fmt.Errorf("failed to open module: %w", err)
 	}
 
 	if err := ctx.Initialize(); err != nil {
@@ -358,7 +387,7 @@ func openModule(path string) (moduleCtx, error) {
 		return moduleCtx{}, fmt.Errorf("failed to initialize module: %w", err)
 	}
 
-	modCtx := moduleCtx{ctx}
+	modCtx := moduleCtx{Ctx: ctx, path: absPath}
 	moduleReferences[absPath] = moduleRef{
 		ctx:      modCtx,
 		refCount: 1,
@@ -369,43 +398,43 @@ func openModule(path string) (moduleCtx, error) {
 // Context to a specific module. Users of the module all share the same context.
 type moduleCtx struct {
 	*pkcs11.Ctx
+
+	// path is the key under which this module is held in moduleReferences.
+	path string
 }
 
+// errModuleRefCount is returned by Close when the reference count for the
+// module no longer matches the Contexts holding it — a Context closed through
+// something other than Context.Close, or a moduleCtx copied and closed twice.
+var errModuleRefCount = errors.New("PKCS#11 module reference count is inconsistent")
+
 // Close drops reference to its associated module and does cleanup if it is the last reference.
-func (mc moduleCtx) Close() {
+//
+// The refcount is the only thing standing between the shared *pkcs11.Ctx and a
+// use-after-free, so drift is reported rather than acted on: an error, not a
+// panic, and never a Destroy the count does not justify.
+func (mc moduleCtx) Close() error {
 	moduleReferencesMutex.Lock()
 	defer moduleReferencesMutex.Unlock()
 
-	var path string
-	var mod moduleRef
-	for p, ref := range moduleReferences {
-		if ref.ctx == mc {
-			path = p
-			mod = ref
-			break
-		}
-	}
-	if path == "" {
-		// Instance has already been destroyed even though we are holding a reference.
-		panic("referenced module not found")
-	}
-	if mod.refCount < 1 {
-		// Reference count has lost count of the number of actual references.
-		panic("invalid reference count for PKCS#11 library")
+	mod, ok := moduleReferences[mc.path]
+	if !ok || mod.ctx.Ctx != mc.Ctx || mod.refCount < 1 {
+		return errModuleRefCount
 	}
 
 	if mod.refCount == 1 {
 		// Do cleanup as last reference.
 		_ = mc.Finalize()
 		mc.Destroy()
-		delete(moduleReferences, path)
-	} else {
-		// Decrement reference count.
-		moduleReferences[path] = moduleRef{
-			ctx:      mod.ctx,
-			refCount: mod.refCount - 1,
-		}
+		delete(moduleReferences, mc.path)
+		return nil
 	}
+	// Decrement reference count.
+	moduleReferences[mc.path] = moduleRef{
+		ctx:      mod.ctx,
+		refCount: mod.refCount - 1,
+	}
+	return nil
 }
 
 // Configure creates a new Context based on the supplied PKCS#11 configuration.
@@ -443,6 +472,10 @@ func Configure(config *Config) (*Context, error) {
 	if config.UserType == 0 {
 		config.UserType = DefaultUserType
 	}
+	userType, err := loginUserType(config.UserType)
+	if err != nil {
+		return nil, err
+	}
 
 	if config.GCMIVLength == 0 {
 		config.GCMIVLength = DefaultGCMIVLength
@@ -457,23 +490,41 @@ func Configure(config *Config) (*Context, error) {
 		ctx: modCtx,
 	}
 
+	// Everything acquired from here on is released again if Configure fails
+	// part-way. Dropping the module reference alone is not enough: when another
+	// Context shares the module, moduleCtx.Close only decrements a refcount and
+	// never finalizes the library, so a persistent session opened just before a
+	// failed C_Login would otherwise stay open — inaccessible to anyone — and
+	// each retry against a token that keeps rejecting the PIN would consume one
+	// more of the token's sessions until it ran out.
+	succeeded := false
+	defer func() {
+		if succeeded {
+			return
+		}
+		if instance.persistentSession != 0 {
+			_ = instance.ctx.CloseSession(instance.persistentSession)
+		}
+		if instance.pool != nil {
+			instance.pool.Close()
+		}
+		_ = instance.ctx.Close()
+	}()
+
 	slots, err := instance.ctx.GetSlotList(true)
 	if err != nil {
-		instance.ctx.Close()
-		return nil, errors.WithMessage(err, "failed to list PKCS#11 slots")
+		return nil, fmt.Errorf("failed to list PKCS#11 slots: %w", err)
 	}
 
 	instance.slot, instance.token, err = instance.findToken(slots, config.TokenSerial, config.TokenLabel, config.SlotNumber)
 	if err != nil {
-		instance.ctx.Close()
 		return nil, err
 	}
 
 	// Create the session pool.
-	maxSessions := instance.cfg.MaxSessions
-	tokenMaxSessions := instance.token.MaxRwSessionCount
-	if tokenMaxSessions != pkcs11.CK_EFFECTIVELY_INFINITE && tokenMaxSessions != pkcs11.CK_UNAVAILABLE_INFORMATION {
-		maxSessions = min(maxSessions, castDown(tokenMaxSessions))
+	maxSessions, err := effectiveMaxSessions(instance.cfg.MaxSessions, instance.token.MaxRwSessionCount)
+	if err != nil {
+		return nil, err
 	}
 
 	// We will use one session to keep state alive, so the pool gets maxSessions - 1
@@ -483,8 +534,7 @@ func Configure(config *Config) (*Context, error) {
 	// used to keep a connection alive to the token to ensure object handles and the log in status remain accessible.
 	instance.persistentSession, err = instance.ctx.OpenSession(instance.slot, pkcs11.CKF_SERIAL_SESSION|pkcs11.CKF_RW_SESSION)
 	if err != nil {
-		instance.ctx.Close()
-		return nil, errors.WithMessagef(err, "failed to create long term session")
+		return nil, fmt.Errorf("failed to create long term session: %w", err)
 	}
 
 	if !config.LoginNotSupported {
@@ -494,12 +544,15 @@ func Configure(config *Config) (*Context, error) {
 		// Hold the PIN in a []byte only for the duration of the login call and
 		// wipe it immediately afterwards, so the secret does not linger in a
 		// heap buffer for the lifetime of the process.
-		pin := []byte(instance.cfg.Pin)
-		if instance.cfg.UserType == 1 {
-			err = instance.ctx.Login(instance.persistentSession, pkcs11.CKU_USER, pin)
+		var pin []byte
+		if config.PinFunc != nil {
+			if pin, err = config.PinFunc(); err != nil {
+				return nil, fmt.Errorf("PinFunc: %w", err)
+			}
 		} else {
-			err = instance.ctx.Login(instance.persistentSession, CryptoUser, pin)
+			pin = []byte(instance.cfg.Pin)
 		}
+		err = instance.ctx.Login(instance.persistentSession, userType, pin)
 		pkcs11.Wipe(pin)
 		if err != nil {
 
@@ -507,17 +560,56 @@ func Configure(config *Config) (*Context, error) {
 			isP11Error := errors.As(err, &pErr)
 
 			if !isP11Error || pErr != pkcs11.CKR_USER_ALREADY_LOGGED_IN {
-				instance.ctx.Close()
-				return nil, errors.WithMessagef(err, "failed to log into long term session")
+				return nil, fmt.Errorf("failed to log into long term session: %w", err)
 			}
 		}
 	}
 
-	// Drop our reference to the PIN string now that login is complete; it is no
-	// longer needed and there is no reason to keep the secret reachable.
+	// Drop our references to the PIN now that login is complete; neither is
+	// needed again and there is no reason to keep the secret reachable.
 	instance.cfg.Pin = ""
+	instance.cfg.PinFunc = nil
 
+	succeeded = true
 	return instance, nil
+}
+
+// effectiveMaxSessions clamps the configured session limit to the number of
+// read/write sessions the token says it can hold, and checks that at least two
+// remain: one persistent session carrying the login state, and at least one
+// for the pool. The pool constructor panics on a zero capacity, so a token
+// advertising a single read/write session — a legitimately small one, or one
+// returning a corrupted CK_TOKEN_INFO — has to be turned away here with an
+// error rather than allowed to take the process down.
+func effectiveMaxSessions(configured int, tokenMax uint) (int, error) {
+	limit := configured
+	if tokenMax != pkcs11.CK_EFFECTIVELY_INFINITE && tokenMax != pkcs11.CK_UNAVAILABLE_INFORMATION {
+		limit = min(limit, castDown(tokenMax))
+	}
+	if limit < 2 {
+		return 0, fmt.Errorf("token allows %d read/write session(s); crypto11 needs at least 2 (one persistent, one pooled)", limit)
+	}
+	return limit, nil
+}
+
+// loginUserType maps Config.UserType to the CK_USER_TYPE handed to C_Login.
+//
+// Only CKU_USER and the Thales CryptoUser vendor type are meaningful for a
+// crypto11 login. Anything else used to be silently treated as CryptoUser,
+// so a typo — or CKU_SO, which is 0 and therefore indistinguishable from
+// "unset" — logged in as a different principal than the one configured.
+//
+// CryptoUser is compared through uint32 because its value, 0x80000001, does
+// not fit a 32-bit int and the Config field is an int.
+func loginUserType(userType int) (uint, error) {
+	switch {
+	case userType == DefaultUserType:
+		return pkcs11.CKU_USER, nil
+	case uint32(userType) == CryptoUser:
+		return CryptoUser, nil
+	default:
+		return 0, fmt.Errorf("unsupported UserType %d: use DefaultUserType (CKU_USER) or CryptoUser", userType)
+	}
 }
 
 // castDown returns orig as a signed integer. If an overflow would have occurred,
@@ -537,6 +629,11 @@ func castDown(orig uint) int {
 // ConfigureFromFile is a convenience method, which parses the configuration file
 // and calls Configure. The configuration file should be a JSON representation
 // of a Config object.
+//
+// A file whose Pin is set is refused unless it is readable by its owner alone
+// (no group or other permission bits; not checked on Windows). Keeping the PIN
+// out of the file altogether — Configure with a PinFunc, or a Pin taken from a
+// secret store — is the better arrangement.
 func ConfigureFromFile(configLocation string) (*Context, error) {
 	config, err := loadConfigFromFile(configLocation)
 	if err != nil {
@@ -550,7 +647,7 @@ func ConfigureFromFile(configLocation string) (*Context, error) {
 func loadConfigFromFile(configLocation string) (*Config, error) {
 	file, err := os.Open(configLocation) // #nosec G304 -- configLocation is a caller-supplied library parameter, not untrusted network input
 	if err != nil {
-		return nil, errors.WithMessagef(err, "could not open config file: %s", configLocation)
+		return nil, fmt.Errorf("could not open config file: %s: %w", configLocation, err)
 	}
 	defer func() {
 		closeErr := file.Close()
@@ -561,8 +658,23 @@ func loadConfigFromFile(configLocation string) (*Config, error) {
 
 	configDecoder := json.NewDecoder(file)
 	config := &Config{}
-	err = configDecoder.Decode(config)
-	return config, errors.WithMessage(err, "could not decode config file")
+	if err = configDecoder.Decode(config); err != nil {
+		return nil, fmt.Errorf("could not decode config file: %w", err)
+	}
+
+	// A file that carries the PIN is a credential and has to be protected
+	// like one. The check is on the open file, not the path, so it cannot be
+	// raced. Windows file modes do not express this and are not checked.
+	if config.Pin != "" && runtime.GOOS != "windows" {
+		info, err := file.Stat()
+		if err != nil {
+			return nil, fmt.Errorf("could not stat config file: %w", err)
+		}
+		if mode := info.Mode().Perm(); mode&0o077 != 0 {
+			return nil, fmt.Errorf("config file %s holds a PIN but is readable by other users (mode %04o); restrict it to its owner (chmod 600) or move the PIN out of the file", configLocation, mode)
+		}
+	}
+	return config, nil
 }
 
 // Close releases resources used by the Context and unloads the PKCS #11 library if there are no other
@@ -572,20 +684,26 @@ func (c *Context) Close() error {
 	// sync.Once guarantees the teardown runs exactly once even if Close is
 	// called concurrently or repeatedly. Running it twice would double-close the
 	// pool and trip moduleCtx.Close's refcount panic.
+	var err error
 	c.closeOnce.Do(func() {
+		// Wait for every operation that holds a session, and keep new ones out.
+		c.ops.Lock()
+		defer c.ops.Unlock()
+
 		c.closed.Set(true)
 
-		// Block until all resources returned to pool
+		// Nothing is checked out any more, so this returns at once.
 		c.pool.Close()
 
 		// Close our long-term session. We ignore any returned error,
 		// since we plan to kill our collection to the library anyway.
 		_ = c.ctx.CloseSession(c.persistentSession)
+		c.persistentSession = 0
 
 		// Drop reference to the held context. May destroy the module instance
 		// if this is the last reference to it.
-		c.ctx.Close()
+		err = c.ctx.Close()
 	})
 
-	return nil
+	return err
 }
