@@ -51,13 +51,19 @@ func (s *MLKEMSharedSecret) Bytes() ([]byte, error) {
 		if err != nil {
 			return err
 		}
-		if len(attrs) == 0 || attrs[0].Value == nil {
+		if len(attrs) == 0 || len(attrs[0].Value) == 0 {
 			// The token returned no value — typically because the key is
 			// sensitive / non-extractable. Surface a clear error instead of
 			// indexing into an empty result or returning a silent empty secret.
+			// A zero-length value counts: an empty "secret" fed to a KDF is a
+			// publicly known input, not a KEM result.
 			return fmt.Errorf("shared secret value is unavailable (key not extractable?)")
 		}
+		// Hand the caller its own copy and clear the binding's, which it has
+		// no way to reach; the documented pkcs11.Wipe on the returned slice
+		// would otherwise leave this second copy for the garbage collector.
 		raw = append([]byte(nil), attrs[0].Value...)
+		pkcs11.Wipe(attrs[0].Value)
 		return nil
 	})
 	return raw, err
