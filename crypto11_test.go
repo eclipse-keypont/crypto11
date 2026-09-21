@@ -253,3 +253,104 @@ func TestInvalidMaxSessions(t *testing.T) {
 	_, err := Configure(cfg)
 	require.Error(t, err)
 }
+
+func TestEffectiveMaxSessions(t *testing.T) {
+	cases := []struct {
+		name       string
+		configured int
+		tokenMax   uint
+		want       int
+		wantErr    bool
+	}{
+		{"token reports infinite", 1024, pkcs11.CK_EFFECTIVELY_INFINITE, 1024, false},
+		{"token reports unavailable", 1024, pkcs11.CK_UNAVAILABLE_INFORMATION, 1024, false},
+		{"token lower than config", 1024, 10, 10, false},
+		{"config lower than token", 5, 10, 5, false},
+		{"exactly two", 1024, 2, 2, false},
+		{"token allows one session", 1024, 1, 0, true},
+		{"config of two, token of one", 2, 1, 0, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := effectiveMaxSessions(tc.configured, tc.tokenMax)
+			if tc.wantErr {
+				require.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, got)
+		})
+	}
+}
+
+func TestLoginUserType(t *testing.T) {
+	ut, err := loginUserType(DefaultUserType)
+	require.NoError(t, err)
+	assert.Equal(t, uint(pkcs11.CKU_USER), ut)
+
+	ut, err = loginUserType(CryptoUser)
+	require.NoError(t, err)
+	assert.Equal(t, uint(CryptoUser), ut)
+
+	for _, bad := range []int{0, 2, 3, 42, -1} {
+		_, err = loginUserType(bad)
+		assert.Error(t, err, "UserType %d must be rejected", bad)
+	}
+}
+
+func TestUnsupportedUserTypeRejectedBeforeModuleLoad(t *testing.T) {
+	// A bogus module path proves the user type is checked first: had Configure
+	// reached openModule, the error would be about the library, not the user type.
+	cfg := &Config{Path: "/nonexistent/crypto11-test.so", TokenLabel: "x", UserType: 42}
+	_, err := Configure(cfg)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "unsupported UserType 42")
+}
+
+func TestInvalidPinReleasesPersistentSession(t *testing.T) {
+	// Like TestInvalidPinDoesntDestroyLibrary this needs "token1" and "token2":
+	// ctx1 keeps the module loaded so a failed Configure on token2 cannot rely
+	// on C_Finalize to sweep up the persistent session it opened before C_Login
+	// failed. It must close that session itself, or every retry leaks one.
+	cfg := testConfig(t)
+	cfg.TokenLabel = "token1"
+
+	cfgWrongPin := testConfig(t)
+	cfgWrongPin.Pin = "this_should_be_wrong_pin"
+	cfgWrongPin.TokenLabel = "token2"
+
+	ctx1, err := Configure(cfg)
+	if errors.Is(err, errTokenNotFound) {
+		t.Skip("tokens 'token1'/'token2' not found; set PKCS11_MODULE to auto-provision")
+	}
+	require.NoError(t, err)
+	defer ctx1.Close()
+
+	slots, err := ctx1.ctx.GetSlotList(true)
+	require.NoError(t, err)
+	slot, info, err := ctx1.findToken(slots, "", "token2", nil)
+	require.NoError(t, err)
+	before := info.RwSessionCount
+
+	const attempts = 5
+	for i := 0; i < attempts; i++ {
+		_, err = Configure(cfgWrongPin)
+		require.Error(t, err)
+	}
+
+	info2, err := ctx1.ctx.GetTokenInfo(slot)
+	require.NoError(t, err)
+	if before == pkcs11.CK_UNAVAILABLE_INFORMATION || info2.RwSessionCount == pkcs11.CK_UNAVAILABLE_INFORMATION {
+		t.Log("token does not report session counts; leak check limited to 'a later Configure still works'")
+	} else {
+		assert.Equal(t, before, info2.RwSessionCount,
+			"%d failed logins must not leave sessions open on token2", attempts)
+	}
+
+	// And the token is still usable afterwards.
+	cfgGood := testConfig(t)
+	cfgGood.TokenLabel = "token2"
+	ctx2, err := Configure(cfgGood)
+	require.NoError(t, err)
+	require.NoError(t, ctx2.Close())
+}

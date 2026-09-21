@@ -443,6 +443,10 @@ func Configure(config *Config) (*Context, error) {
 	if config.UserType == 0 {
 		config.UserType = DefaultUserType
 	}
+	userType, err := loginUserType(config.UserType)
+	if err != nil {
+		return nil, err
+	}
 
 	if config.GCMIVLength == 0 {
 		config.GCMIVLength = DefaultGCMIVLength
@@ -457,23 +461,41 @@ func Configure(config *Config) (*Context, error) {
 		ctx: modCtx,
 	}
 
+	// Everything acquired from here on is released again if Configure fails
+	// part-way. Dropping the module reference alone is not enough: when another
+	// Context shares the module, moduleCtx.Close only decrements a refcount and
+	// never finalizes the library, so a persistent session opened just before a
+	// failed C_Login would otherwise stay open — inaccessible to anyone — and
+	// each retry against a token that keeps rejecting the PIN would consume one
+	// more of the token's sessions until it ran out.
+	succeeded := false
+	defer func() {
+		if succeeded {
+			return
+		}
+		if instance.persistentSession != 0 {
+			_ = instance.ctx.CloseSession(instance.persistentSession)
+		}
+		if instance.pool != nil {
+			instance.pool.Close()
+		}
+		instance.ctx.Close()
+	}()
+
 	slots, err := instance.ctx.GetSlotList(true)
 	if err != nil {
-		instance.ctx.Close()
 		return nil, errors.WithMessage(err, "failed to list PKCS#11 slots")
 	}
 
 	instance.slot, instance.token, err = instance.findToken(slots, config.TokenSerial, config.TokenLabel, config.SlotNumber)
 	if err != nil {
-		instance.ctx.Close()
 		return nil, err
 	}
 
 	// Create the session pool.
-	maxSessions := instance.cfg.MaxSessions
-	tokenMaxSessions := instance.token.MaxRwSessionCount
-	if tokenMaxSessions != pkcs11.CK_EFFECTIVELY_INFINITE && tokenMaxSessions != pkcs11.CK_UNAVAILABLE_INFORMATION {
-		maxSessions = min(maxSessions, castDown(tokenMaxSessions))
+	maxSessions, err := effectiveMaxSessions(instance.cfg.MaxSessions, instance.token.MaxRwSessionCount)
+	if err != nil {
+		return nil, err
 	}
 
 	// We will use one session to keep state alive, so the pool gets maxSessions - 1
@@ -483,7 +505,6 @@ func Configure(config *Config) (*Context, error) {
 	// used to keep a connection alive to the token to ensure object handles and the log in status remain accessible.
 	instance.persistentSession, err = instance.ctx.OpenSession(instance.slot, pkcs11.CKF_SERIAL_SESSION|pkcs11.CKF_RW_SESSION)
 	if err != nil {
-		instance.ctx.Close()
 		return nil, errors.WithMessagef(err, "failed to create long term session")
 	}
 
@@ -495,11 +516,7 @@ func Configure(config *Config) (*Context, error) {
 		// wipe it immediately afterwards, so the secret does not linger in a
 		// heap buffer for the lifetime of the process.
 		pin := []byte(instance.cfg.Pin)
-		if instance.cfg.UserType == 1 {
-			err = instance.ctx.Login(instance.persistentSession, pkcs11.CKU_USER, pin)
-		} else {
-			err = instance.ctx.Login(instance.persistentSession, CryptoUser, pin)
-		}
+		err = instance.ctx.Login(instance.persistentSession, userType, pin)
 		pkcs11.Wipe(pin)
 		if err != nil {
 
@@ -507,7 +524,6 @@ func Configure(config *Config) (*Context, error) {
 			isP11Error := errors.As(err, &pErr)
 
 			if !isP11Error || pErr != pkcs11.CKR_USER_ALREADY_LOGGED_IN {
-				instance.ctx.Close()
 				return nil, errors.WithMessagef(err, "failed to log into long term session")
 			}
 		}
@@ -517,7 +533,46 @@ func Configure(config *Config) (*Context, error) {
 	// longer needed and there is no reason to keep the secret reachable.
 	instance.cfg.Pin = ""
 
+	succeeded = true
 	return instance, nil
+}
+
+// effectiveMaxSessions clamps the configured session limit to the number of
+// read/write sessions the token says it can hold, and checks that at least two
+// remain: one persistent session carrying the login state, and at least one
+// for the pool. The pool constructor panics on a zero capacity, so a token
+// advertising a single read/write session — a legitimately small one, or one
+// returning a corrupted CK_TOKEN_INFO — has to be turned away here with an
+// error rather than allowed to take the process down.
+func effectiveMaxSessions(configured int, tokenMax uint) (int, error) {
+	limit := configured
+	if tokenMax != pkcs11.CK_EFFECTIVELY_INFINITE && tokenMax != pkcs11.CK_UNAVAILABLE_INFORMATION {
+		limit = min(limit, castDown(tokenMax))
+	}
+	if limit < 2 {
+		return 0, fmt.Errorf("token allows %d read/write session(s); crypto11 needs at least 2 (one persistent, one pooled)", limit)
+	}
+	return limit, nil
+}
+
+// loginUserType maps Config.UserType to the CK_USER_TYPE handed to C_Login.
+//
+// Only CKU_USER and the Thales CryptoUser vendor type are meaningful for a
+// crypto11 login. Anything else used to be silently treated as CryptoUser,
+// so a typo — or CKU_SO, which is 0 and therefore indistinguishable from
+// "unset" — logged in as a different principal than the one configured.
+//
+// CryptoUser is compared through uint32 because its value, 0x80000001, does
+// not fit a 32-bit int and the Config field is an int.
+func loginUserType(userType int) (uint, error) {
+	switch {
+	case userType == DefaultUserType:
+		return pkcs11.CKU_USER, nil
+	case uint32(userType) == CryptoUser:
+		return CryptoUser, nil
+	default:
+		return 0, fmt.Errorf("unsupported UserType %d: use DefaultUserType (CKU_USER) or CryptoUser", userType)
+	}
 }
 
 // castDown returns orig as a signed integer. If an overflow would have occurred,
