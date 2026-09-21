@@ -81,6 +81,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -203,6 +204,12 @@ type Signer interface {
 	crypto.Signer
 
 	// Delete deletes the key pair from the token.
+	//
+	// Delete must not run concurrently with another operation on the same
+	// key. Once it has returned, any further use of the key fails with an
+	// invalid-handle error; an operation already in flight when the objects
+	// are destroyed may fail, or — if the token has recycled the handle for
+	// a new object by then — complete against that object instead.
 	Delete() error
 }
 
@@ -283,7 +290,19 @@ type Config struct {
 	SlotNumber *int
 
 	// User PIN (password).
+	//
+	// A Go string cannot be wiped, so a PIN given here stays in process memory
+	// until the garbage collector happens to reclaim it, however briefly
+	// Configure needed it. Prefer PinFunc when the PIN can be fetched on
+	// demand.
 	Pin string
+
+	// PinFunc, when set, supplies the PIN instead of Pin. It is called once,
+	// from Configure, and the slice it returns is wiped as soon as C_Login has
+	// run — so a caller can read the PIN from a secret store, a file or the
+	// environment at that moment and keep no copy of its own. Configure does
+	// not retain the function. It is ignored when LoginNotSupported is set.
+	PinFunc func() ([]byte, error) `json:"-"`
 
 	// Maximum number of concurrent sessions to open. If zero, DefaultMaxSessions is used.
 	// Otherwise, the value specified must be at least 2.
@@ -525,7 +544,14 @@ func Configure(config *Config) (*Context, error) {
 		// Hold the PIN in a []byte only for the duration of the login call and
 		// wipe it immediately afterwards, so the secret does not linger in a
 		// heap buffer for the lifetime of the process.
-		pin := []byte(instance.cfg.Pin)
+		var pin []byte
+		if config.PinFunc != nil {
+			if pin, err = config.PinFunc(); err != nil {
+				return nil, fmt.Errorf("PinFunc: %w", err)
+			}
+		} else {
+			pin = []byte(instance.cfg.Pin)
+		}
 		err = instance.ctx.Login(instance.persistentSession, userType, pin)
 		pkcs11.Wipe(pin)
 		if err != nil {
@@ -539,9 +565,10 @@ func Configure(config *Config) (*Context, error) {
 		}
 	}
 
-	// Drop our reference to the PIN string now that login is complete; it is no
-	// longer needed and there is no reason to keep the secret reachable.
+	// Drop our references to the PIN now that login is complete; neither is
+	// needed again and there is no reason to keep the secret reachable.
 	instance.cfg.Pin = ""
+	instance.cfg.PinFunc = nil
 
 	succeeded = true
 	return instance, nil
@@ -602,6 +629,11 @@ func castDown(orig uint) int {
 // ConfigureFromFile is a convenience method, which parses the configuration file
 // and calls Configure. The configuration file should be a JSON representation
 // of a Config object.
+//
+// A file whose Pin is set is refused unless it is readable by its owner alone
+// (no group or other permission bits; not checked on Windows). Keeping the PIN
+// out of the file altogether — Configure with a PinFunc, or a Pin taken from a
+// secret store — is the better arrangement.
 func ConfigureFromFile(configLocation string) (*Context, error) {
 	config, err := loadConfigFromFile(configLocation)
 	if err != nil {
@@ -628,6 +660,19 @@ func loadConfigFromFile(configLocation string) (*Config, error) {
 	config := &Config{}
 	if err = configDecoder.Decode(config); err != nil {
 		return nil, fmt.Errorf("could not decode config file: %w", err)
+	}
+
+	// A file that carries the PIN is a credential and has to be protected
+	// like one. The check is on the open file, not the path, so it cannot be
+	// raced. Windows file modes do not express this and are not checked.
+	if config.Pin != "" && runtime.GOOS != "windows" {
+		info, err := file.Stat()
+		if err != nil {
+			return nil, fmt.Errorf("could not stat config file: %w", err)
+		}
+		if mode := info.Mode().Perm(); mode&0o077 != 0 {
+			return nil, fmt.Errorf("config file %s holds a PIN but is readable by other users (mode %04o); restrict it to its owner (chmod 600) or move the PIN out of the file", configLocation, mode)
+		}
 	}
 	return config, nil
 }
