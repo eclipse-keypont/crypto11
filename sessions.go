@@ -39,10 +39,12 @@ func (c *Context) withSession(f func(session *pkcs11Session) error) (err error) 
 }
 
 // putSession returns a session to the pool once an operation on it has finished
-// with err. A session the token has declared dead is closed and replaced instead
-// of being handed to the next caller: returning it would make every operation
-// that happens to draw it fail the same way, long after the fault that killed it.
+// with err, and releases the read lock getSession took. A session the token has
+// declared dead is closed and replaced instead of being handed to the next
+// caller: returning it would make every operation that happens to draw it fail
+// the same way, long after the fault that killed it.
 func (c *Context) putSession(session *pkcs11Session, err error) {
+	defer c.ops.RUnlock()
 	if sessionFatal(err) {
 		session.Close()
 		// A nil resource tells the pool to open a fresh session in its place.
@@ -78,8 +80,20 @@ func sessionFatal(err error) bool {
 }
 
 // getSession retrieves a session from the pool, respecting the timeout defined in the Context config.
-// Callers are responsible for putting this session back in the pool.
+// Callers are responsible for handing this session back through putSession.
+//
+// The session comes with the Context's read lock held: from here until putSession, Close cannot
+// run. That is what makes "is the Context still open?" and "take a session" one step rather than
+// two — a check-then-act that Close could otherwise slip between.
 func (c *Context) getSession() (*pkcs11Session, error) {
+	c.ops.RLock()
+	if c.closed.Get() {
+		c.ops.RUnlock()
+		// We don't use errClosed to ensure our tests identify functions that aren't checking for closure
+		// correctly.
+		return nil, errors.New("context is closed")
+	}
+
 	ctx := context.Background()
 
 	if c.cfg.PoolWaitTimeout > 0 {
@@ -91,11 +105,11 @@ func (c *Context) getSession() (*pkcs11Session, error) {
 	resource, err := c.pool.Get(ctx)
 	if errors.Is(err, pool.ErrClosed) {
 		// Our Context must have been closed, return a nicer error.
-		// We don't use errClosed to ensure our tests identify functions that aren't checking for closure
-		// correctly.
+		c.ops.RUnlock()
 		return nil, errors.New("context is closed")
 	}
 	if err != nil {
+		c.ops.RUnlock()
 		return nil, err
 	}
 

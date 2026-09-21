@@ -327,7 +327,7 @@ func TestHmacResetFailureDoesNotReplayPreviousMAC(t *testing.T) {
 	held, err := ctx.getSession()
 	require.NoError(t, err)
 	h.Reset()
-	ctx.pool.Put(held)
+	ctx.putSession(held, nil)
 
 	// The hash is dead. It must say so — not hand back the MAC of "first
 	// message" as if it were the MAC of whatever comes next.

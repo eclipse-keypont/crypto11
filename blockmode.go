@@ -83,8 +83,9 @@ type blockModeCloser struct {
 	// modeDecrypt or modeEncrypt
 	mode int
 
-	// Cleanup function
-	cleanup func()
+	// Cleanup function. It takes the error the operation ended with, so that
+	// a session the token declared dead is discarded rather than pooled.
+	cleanup func(err error)
 }
 
 // newBlockModeCloser creates a new blockModeCloser for the chosen mechanism and mode.
@@ -99,8 +100,8 @@ func (key *SecretKey) newBlockModeCloser(mech uint, mode int, iv []byte, setFina
 		session:   session,
 		blockSize: key.Cipher.BlockSize,
 		mode:      mode,
-		cleanup: func() {
-			key.context.pool.Put(session)
+		cleanup: func(err error) {
+			key.context.putSession(session, err)
 		},
 	}
 	mechDescription := pkcs11.NewMechanism(mech, iv)
@@ -114,7 +115,7 @@ func (key *SecretKey) newBlockModeCloser(mech uint, mode int, iv []byte, setFina
 		panic("unexpected mode")
 	}
 	if err != nil {
-		bmc.cleanup()
+		bmc.cleanup(err)
 		return nil, err
 	}
 	if setFinalizer {
@@ -153,6 +154,12 @@ func (bmc *blockModeCloser) CryptBlocks(dst, src []byte) {
 		result, err = bmc.session.ctx.EncryptUpdate(bmc.session.handle, src)
 	}
 	if err != nil {
+		// The operation is dead; nothing will reach Close for this block mode
+		// in a way that helps. Release the session before panicking, or it —
+		// and the Context's read lock — would be held until the finalizer
+		// runs, if it ever does.
+		bmc.session = nil
+		bmc.cleanup(err)
 		panic(err)
 	}
 	// The binding's buffer is a second copy of the output — plaintext, in
@@ -193,7 +200,7 @@ func (bmc *blockModeCloser) close() error {
 		result, err = bmc.session.ctx.EncryptFinal(bmc.session.handle)
 	}
 	bmc.session = nil
-	bmc.cleanup()
+	bmc.cleanup(err)
 	if err != nil {
 		return err
 	}

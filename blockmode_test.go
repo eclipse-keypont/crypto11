@@ -110,8 +110,8 @@ func TestBlockModeFinalizerNeverPanics(t *testing.T) {
 			session:   s,
 			blockSize: 16,
 			mode:      modeDecrypt,
-			// The dead session is not reusable; ask the pool for a fresh one.
-			cleanup: func() { ctx.pool.Put(nil) },
+			// The dead session must be discarded, as the real constructor's cleanup would.
+			cleanup: func(err error) { ctx.putSession(s, err) },
 		}
 	}
 
