@@ -206,6 +206,7 @@ func (c *Context) GenerateMLKEMKeyPairWithAttributes(public, private AttributeSe
 		})
 		private.AddIfNotPresent([]*pkcs11.Attribute{
 			pkcs11.NewAttribute(pkcs11.CKA_TOKEN, true),
+			pkcs11.NewAttribute(pkcs11.CKA_PRIVATE, c.defaultPrivate()),
 			pkcs11.NewAttribute(pkcs11.CKA_SENSITIVE, true),
 			pkcs11.NewAttribute(pkcs11.CKA_EXTRACTABLE, false),
 			pkcs11.NewAttribute(pkcs11.CKA_DECAPSULATE, true),

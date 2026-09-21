@@ -281,6 +281,7 @@ func (c *Context) GenerateSecretKeyWithAttributes(template AttributeSet, bits in
 		template.AddIfNotPresent([]*pkcs11.Attribute{
 			pkcs11.NewAttribute(pkcs11.CKA_CLASS, pkcs11.CKO_SECRET_KEY),
 			pkcs11.NewAttribute(pkcs11.CKA_TOKEN, true),
+			pkcs11.NewAttribute(pkcs11.CKA_PRIVATE, c.defaultPrivate()),
 			pkcs11.NewAttribute(pkcs11.CKA_SIGN, cipher.MAC),
 			pkcs11.NewAttribute(pkcs11.CKA_VERIFY, cipher.MAC),
 			pkcs11.NewAttribute(pkcs11.CKA_ENCRYPT, cipher.Encrypt), // Not supported on CloudHSM
