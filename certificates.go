@@ -9,11 +9,11 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/asn1"
+	"errors"
 	"fmt"
 	"math/big"
 
 	pkcs11 "github.com/eclipse-keypont/pkcs11-go/cryptoki"
-	"github.com/pkg/errors"
 )
 
 // FindCertificate retrieves a previously imported certificate. Any combination of id, label
@@ -48,12 +48,12 @@ func parseCertificateValue(rawCertificate []byte) (*x509.Certificate, error) {
 	var der asn1.RawValue
 	rest, err := asn1.Unmarshal(rawCertificate, &der)
 	if err != nil {
-		return nil, errors.WithMessage(err, "failed to decode certificate DER")
+		return nil, fmt.Errorf("failed to decode certificate DER: %w", err)
 	}
 
 	for _, b := range rest {
 		if b != 0 {
-			return nil, errors.Errorf("%d bytes of non-null trailing data after certificate", len(rest))
+			return nil, fmt.Errorf("%d bytes of non-null trailing data after certificate", len(rest))
 		}
 	}
 
@@ -76,7 +76,7 @@ func findRawCertificate(session *pkcs11Session, id []byte, label []byte, serial 
 	if serial != nil {
 		derSerial, err := asn1.Marshal(serial)
 		if err != nil {
-			return nil, errors.WithMessage(err, "failed to encode serial")
+			return nil, fmt.Errorf("failed to encode serial: %w", err)
 		}
 
 		template = append(template, pkcs11.NewAttribute(pkcs11.CKA_SERIAL_NUMBER, derSerial))
@@ -363,7 +363,7 @@ func findX509Certificates(session *pkcs11Session, attributes []*pkcs11.Attribute
 
 		certificate, err := parseCertificateValue(values[0].Value)
 		if err != nil {
-			return nil, errors.WithMessage(err, describeCertificateObject(session, handle))
+			return nil, fmt.Errorf("%s: %w", describeCertificateObject(session, handle), err)
 		}
 
 		certificates = append(certificates, certificate)

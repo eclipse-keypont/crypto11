@@ -76,6 +76,7 @@ package crypto11
 import (
 	"crypto"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -85,7 +86,6 @@ import (
 	"time"
 
 	pkcs11 "github.com/eclipse-keypont/pkcs11-go/cryptoki"
-	"github.com/pkg/errors"
 
 	"github.com/eclipse-keypont/crypto11/v2/internal/pool"
 )
@@ -123,8 +123,10 @@ type pkcs11Object struct {
 
 func (o *pkcs11Object) Delete() error {
 	err := o.context.withSession(func(session *pkcs11Session) error {
-		err := session.ctx.DestroyObject(session.handle, o.handle)
-		return errors.WithMessage(err, "failed to destroy key")
+		if err := session.ctx.DestroyObject(session.handle, o.handle); err != nil {
+			return fmt.Errorf("failed to destroy key: %w", err)
+		}
+		return nil
 	})
 	if err == nil {
 		o.handle = pkcs11.CK_INVALID_HANDLE
@@ -152,8 +154,10 @@ func (k *pkcs11PrivateKey) Delete() error {
 	}
 
 	err = k.context.withSession(func(session *pkcs11Session) error {
-		err := session.ctx.DestroyObject(session.handle, k.pubKeyHandle)
-		return errors.WithMessage(err, "failed to destroy public key")
+		if err := session.ctx.DestroyObject(session.handle, k.pubKeyHandle); err != nil {
+			return fmt.Errorf("failed to destroy public key: %w", err)
+		}
+		return nil
 	})
 	if err == nil {
 		k.pubKeyHandle = pkcs11.CK_INVALID_HANDLE
@@ -356,7 +360,7 @@ func openModule(path string) (moduleCtx, error) {
 
 	ctx, err := pkcs11.New(absPath)
 	if err != nil {
-		return moduleCtx{}, errors.WithMessage(err, "failed to open module")
+		return moduleCtx{}, fmt.Errorf("failed to open module: %w", err)
 	}
 
 	if err := ctx.Initialize(); err != nil {
@@ -490,7 +494,7 @@ func Configure(config *Config) (*Context, error) {
 
 	slots, err := instance.ctx.GetSlotList(true)
 	if err != nil {
-		return nil, errors.WithMessage(err, "failed to list PKCS#11 slots")
+		return nil, fmt.Errorf("failed to list PKCS#11 slots: %w", err)
 	}
 
 	instance.slot, instance.token, err = instance.findToken(slots, config.TokenSerial, config.TokenLabel, config.SlotNumber)
@@ -511,7 +515,7 @@ func Configure(config *Config) (*Context, error) {
 	// used to keep a connection alive to the token to ensure object handles and the log in status remain accessible.
 	instance.persistentSession, err = instance.ctx.OpenSession(instance.slot, pkcs11.CKF_SERIAL_SESSION|pkcs11.CKF_RW_SESSION)
 	if err != nil {
-		return nil, errors.WithMessagef(err, "failed to create long term session")
+		return nil, fmt.Errorf("failed to create long term session: %w", err)
 	}
 
 	if !config.LoginNotSupported {
@@ -530,7 +534,7 @@ func Configure(config *Config) (*Context, error) {
 			isP11Error := errors.As(err, &pErr)
 
 			if !isP11Error || pErr != pkcs11.CKR_USER_ALREADY_LOGGED_IN {
-				return nil, errors.WithMessagef(err, "failed to log into long term session")
+				return nil, fmt.Errorf("failed to log into long term session: %w", err)
 			}
 		}
 	}
@@ -611,7 +615,7 @@ func ConfigureFromFile(configLocation string) (*Context, error) {
 func loadConfigFromFile(configLocation string) (*Config, error) {
 	file, err := os.Open(configLocation) // #nosec G304 -- configLocation is a caller-supplied library parameter, not untrusted network input
 	if err != nil {
-		return nil, errors.WithMessagef(err, "could not open config file: %s", configLocation)
+		return nil, fmt.Errorf("could not open config file: %s: %w", configLocation, err)
 	}
 	defer func() {
 		closeErr := file.Close()
@@ -622,8 +626,10 @@ func loadConfigFromFile(configLocation string) (*Config, error) {
 
 	configDecoder := json.NewDecoder(file)
 	config := &Config{}
-	err = configDecoder.Decode(config)
-	return config, errors.WithMessage(err, "could not decode config file")
+	if err = configDecoder.Decode(config); err != nil {
+		return nil, fmt.Errorf("could not decode config file: %w", err)
+	}
+	return config, nil
 }
 
 // Close releases resources used by the Context and unloads the PKCS #11 library if there are no other

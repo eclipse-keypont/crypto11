@@ -10,12 +10,12 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"encoding/asn1"
+	"errors"
 	"fmt"
 	"io"
 	"math/big"
 
 	pkcs11 "github.com/eclipse-keypont/pkcs11-go/cryptoki"
-	"github.com/pkg/errors"
 )
 
 // errUnsupportedEllipticCurve is returned when an elliptic curve
@@ -150,7 +150,7 @@ func unmarshalEcPoint(b []byte, c elliptic.Curve) (*big.Int, *big.Int, error) {
 	var pointBytes []byte
 	extra, err := asn1.Unmarshal(b, &pointBytes)
 	if err != nil {
-		return nil, nil, errors.WithMessage(err, "elliptic curve point is invalid ASN.1")
+		return nil, nil, fmt.Errorf("elliptic curve point is invalid ASN.1: %w", err)
 	}
 
 	if len(extra) > 0 {
