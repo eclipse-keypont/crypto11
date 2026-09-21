@@ -179,18 +179,40 @@ func (c *Context) FindCertificateChain(id []byte, label []byte, serial *big.Int)
 	return chain, nil
 }
 
+// maxChainDepth bounds how many certificates findIssuerChain will place, the leaf included.
+// Real chains are three or four deep. The bound is there because token contents are not
+// necessarily under the caller's control — anything able to write to the token could lay out a
+// long, correctly signed chain — and the walk holds a pooled session for as long as it runs. A
+// chain that reaches the bound is returned as it stands, like one whose next issuer is absent.
+const maxChainDepth = 16
+
 // findIssuerChain walks from leaf up through the issuers held on the token, stopping at a
-// self-issued certificate or at the first issuer it cannot find.
+// self-issued certificate, at the first issuer it cannot find, or at maxChainDepth.
 //
 // The walk is iterative and keeps every certificate it has already placed, so that a cycle — two
 // CAs cross-signing each other, say — terminates instead of running until the stack is exhausted.
-// Token contents are not necessarily under the caller's control: anything that can write to the
-// token decides how long this runs.
 func findIssuerChain(session *pkcs11Session, leaf *x509.Certificate) ([]*x509.Certificate, error) {
 	chain := []*x509.Certificate{leaf}
 	placed := map[string]bool{string(leaf.Raw): true}
 
-	for {
+	// findIssuer's authority-key-identifier fallback needs every certificate on the token.
+	// Reading and parsing them all once per hop made a chain of N certificates whose subject
+	// attributes do not match cost N full scans; they are read once per walk, and only if some
+	// hop actually asks for them.
+	var all []*x509.Certificate
+	scanned := false
+	allCertificates := func() ([]*x509.Certificate, error) {
+		if !scanned {
+			var err error
+			if all, err = findX509Certificates(session, nil); err != nil {
+				return nil, err
+			}
+			scanned = true
+		}
+		return all, nil
+	}
+
+	for len(chain) < maxChainDepth {
 		current := chain[len(chain)-1]
 
 		// A self-issued certificate is the top of the chain: following its issuer name would
@@ -199,7 +221,7 @@ func findIssuerChain(session *pkcs11Session, leaf *x509.Certificate) ([]*x509.Ce
 			return chain, nil
 		}
 
-		issuer, err := findIssuer(session, current, placed)
+		issuer, err := findIssuer(session, current, placed, allCertificates)
 		if err != nil {
 			return nil, err
 		}
@@ -210,16 +232,20 @@ func findIssuerChain(session *pkcs11Session, leaf *x509.Certificate) ([]*x509.Ce
 		chain = append(chain, issuer)
 		placed[string(issuer.Raw)] = true
 	}
+
+	return chain, nil
 }
 
 // findIssuer returns the certificate on the token that signed cert, or nil if there is none.
 // Certificates already placed in the chain are not considered again.
 //
 // The subject search is what the token can answer directly. The authority key identifier scan
-// behind it costs a read of every certificate on the token, so it is a fallback rather than the
-// first move, and is skipped entirely when cert names no authority key identifier — an empty one
-// would otherwise match every certificate that has no subject key identifier.
-func findIssuer(session *pkcs11Session, cert *x509.Certificate, placed map[string]bool) (*x509.Certificate, error) {
+// behind it costs a read of every certificate on the token — allCertificates, which the caller
+// memoizes across hops — so it is a fallback rather than the first move, and is skipped entirely
+// when cert names no authority key identifier — an empty one would otherwise match every
+// certificate that has no subject key identifier.
+func findIssuer(session *pkcs11Session, cert *x509.Certificate, placed map[string]bool,
+	allCertificates func() ([]*x509.Certificate, error)) (*x509.Certificate, error) {
 	candidates, err := findX509Certificates(session, []*pkcs11.Attribute{
 		pkcs11.NewAttribute(pkcs11.CKA_SUBJECT, cert.RawIssuer),
 	})
@@ -238,7 +264,7 @@ func findIssuer(session *pkcs11Session, cert *x509.Certificate, placed map[strin
 	// Not every token indexes CKA_SUBJECT usefully, and a certificate can be imported with a
 	// subject attribute that does not match the DER it holds, so the identifiers carried inside
 	// the certificates get a second chance at the link.
-	all, err := findX509Certificates(session, nil)
+	all, err := allCertificates()
 	if err != nil {
 		return nil, err
 	}

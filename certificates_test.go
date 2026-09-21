@@ -14,6 +14,7 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/asn1"
+	"fmt"
 	"math/big"
 	"slices"
 	"testing"
@@ -680,4 +681,27 @@ func generateFastCertDER(t *testing.T, endsInNull bool) []byte {
 
 	t.Fatal("no certificate ending in a null byte was generated")
 	return nil
+}
+
+// A chain longer than any real PKI produces is cut at maxChainDepth rather than walked to its
+// end: the length of a chain on the token is decided by whoever wrote it there, and the walk
+// holds a pooled session for its duration.
+func TestFindCertificateChainIsBounded(t *testing.T) {
+	skipTest(t, skipTestCert)
+
+	withContext(t, func(ctx *Context) {
+		names := make([]string, maxChainDepth+3)
+		for i := range names {
+			names[i] = fmt.Sprintf("deep-%d", i)
+		}
+		chain := generateCertChain(t, names...)
+		ids := importChain(t, ctx, chain)
+		defer deleteCerts(t, ctx, ids)
+
+		got, err := ctx.FindCertificateChain(ids[0], nil, nil)
+		require.NoError(t, err)
+
+		require.Len(t, got, maxChainDepth)
+		requireChainEqual(t, got, chain[:maxChainDepth])
+	})
 }
