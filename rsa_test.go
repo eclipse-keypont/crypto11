@@ -10,7 +10,7 @@ import (
 	"crypto/rand"
 	"crypto/rsa"
 	_ "crypto/sha1"
-	_ "crypto/sha256"
+	"crypto/sha256"
 	_ "crypto/sha512"
 	"math/big"
 	"testing"
@@ -297,4 +297,99 @@ func TestRsaRequiredArgs(t *testing.T) {
 
 	_, err = ctx.GenerateRSAKeyPairWithLabel(val, nil, 2048)
 	require.Error(t, err)
+}
+
+func TestPKCS1v15SigningRejectsUnknownHashAndWrongDigest(t *testing.T) {
+	withContext(t, func(ctx *Context) {
+		key, err := ctx.GenerateRSAKeyPair(randomBytes(), rsaSize)
+		require.NoError(t, err)
+		defer func() { _ = key.Delete() }()
+
+		digest := sha256.Sum256([]byte("message"))
+
+		// A hash with no DigestInfo in the table used to be signed bare — as a
+		// raw signature masquerading as a SHA3-256 one.
+		_, err = key.Sign(rand.Reader, digest[:], crypto.SHA3_256)
+		require.ErrorIs(t, err, errUnsupportedRSAOptions)
+
+		// The digest has to be the size the named hash produces.
+		_, err = key.Sign(rand.Reader, digest[:20], crypto.SHA256)
+		require.Error(t, err)
+
+		// crypto.Hash(0) is the documented way to ask for the input to be
+		// signed as it is, and still works.
+		sig, err := key.Sign(rand.Reader, digest[:], crypto.Hash(0))
+		require.NoError(t, err)
+		require.NoError(t, rsa.VerifyPKCS1v15(key.Public().(*rsa.PublicKey), crypto.Hash(0), digest[:], sig))
+
+		// And so does the ordinary case.
+		sig, err = key.Sign(rand.Reader, digest[:], crypto.SHA256)
+		require.NoError(t, err)
+		require.NoError(t, rsa.VerifyPKCS1v15(key.Public().(*rsa.PublicKey), crypto.SHA256, digest[:], sig))
+	})
+}
+
+func TestPKCS1v15DecryptionFailureIsOpaque(t *testing.T) {
+	withContext(t, func(ctx *Context) {
+		key, err := ctx.GenerateRSAKeyPair(randomBytes(), rsaSize)
+		require.NoError(t, err)
+		defer func() { _ = key.Delete() }()
+
+		pub := key.Public().(*rsa.PublicKey)
+		// Random bytes below the modulus: a well-formed RSA input whose
+		// decryption will not carry PKCS#1 v1.5 padding.
+		garbage := make([]byte, pub.Size())
+		_, err = rand.Read(garbage)
+		require.NoError(t, err)
+		garbage[0] = 0
+
+		// Two acceptable outcomes. A token that reports the bad padding must
+		// have its reason collapsed to rsa.ErrDecryption. A token built on a
+		// library with implicit rejection (OpenSSL 3.2+, which SoftHSMv3 uses)
+		// reports no error at all and returns deterministic pseudo-random
+		// bytes instead, which is the stronger countermeasure; nothing to
+		// collapse there.
+		for _, opts := range []crypto.DecrypterOpts{nil, &rsa.PKCS1v15DecryptOptions{}} {
+			out, err := key.Decrypt(rand.Reader, garbage, opts)
+			if err == nil {
+				t.Log("token implements implicit rejection: no error, synthetic plaintext")
+				require.NotEmpty(t, out)
+				continue
+			}
+			require.ErrorIs(t, err, rsa.ErrDecryption, "the token's reason must not be exposed")
+		}
+
+		// A real ciphertext still decrypts.
+		ciphertext, err := rsa.EncryptPKCS1v15(rand.Reader, pub, []byte("hello"))
+		require.NoError(t, err)
+		plaintext, err := key.Decrypt(rand.Reader, ciphertext, nil)
+		require.NoError(t, err)
+		require.Equal(t, []byte("hello"), plaintext)
+	})
+}
+
+func TestOAEPMGFHashIsHonoured(t *testing.T) {
+	withContext(t, func(ctx *Context) {
+		skipIfMechUnsupported(t, ctx, pkcs11.CKM_RSA_PKCS_OAEP)
+
+		key, err := ctx.GenerateRSAKeyPair(randomBytes(), rsaSize)
+		require.NoError(t, err)
+		defer func() { _ = key.Delete() }()
+		pub := key.Public().(*rsa.PublicKey)
+
+		// crypto/rsa encrypts with one hash for both OAEP and MGF1.
+		ciphertext, err := rsa.EncryptOAEP(sha256.New(), rand.Reader, pub, []byte("hello"), nil)
+		require.NoError(t, err)
+
+		// Explicitly matching MGF hash: decrypts.
+		plaintext, err := key.Decrypt(rand.Reader, ciphertext, &rsa.OAEPOptions{Hash: crypto.SHA256, MGFHash: crypto.SHA256})
+		if err != nil {
+			t.Skipf("token does not support OAEP with SHA-256: %v", err)
+		}
+		require.Equal(t, []byte("hello"), plaintext)
+
+		// A different MGF hash used to be ignored, and this decrypted anyway.
+		_, err = key.Decrypt(rand.Reader, ciphertext, &rsa.OAEPOptions{Hash: crypto.SHA256, MGFHash: crypto.SHA512})
+		require.Error(t, err, "decrypting under MGF1-SHA512 what was encrypted under MGF1-SHA256 must fail")
+	})
 }

@@ -51,13 +51,19 @@ func (s *MLKEMSharedSecret) Bytes() ([]byte, error) {
 		if err != nil {
 			return err
 		}
-		if len(attrs) == 0 || attrs[0].Value == nil {
+		if len(attrs) == 0 || len(attrs[0].Value) == 0 {
 			// The token returned no value — typically because the key is
 			// sensitive / non-extractable. Surface a clear error instead of
 			// indexing into an empty result or returning a silent empty secret.
+			// A zero-length value counts: an empty "secret" fed to a KDF is a
+			// publicly known input, not a KEM result.
 			return fmt.Errorf("shared secret value is unavailable (key not extractable?)")
 		}
+		// Hand the caller its own copy and clear the binding's, which it has
+		// no way to reach; the documented pkcs11.Wipe on the returned slice
+		// would otherwise leave this second copy for the garbage collector.
 		raw = append([]byte(nil), attrs[0].Value...)
+		pkcs11.Wipe(attrs[0].Value)
 		return nil
 	})
 	return raw, err
@@ -195,6 +201,16 @@ func (c *Context) GenerateMLKEMKeyPairWithAttributes(public, private AttributeSe
 	if !validMLKEMParameterSet(paramSet) {
 		return nil, fmt.Errorf("invalid ML-KEM parameter set %#x (expected MLKEM512, MLKEM768 or MLKEM1024)", paramSet)
 	}
+	// AddIfNotPresent below leaves a CKA_PARAMETER_SET already in a template
+	// alone, so the token would generate at that level while the returned key
+	// pair reported paramSet. There is one effective level; both inputs have
+	// to agree on it.
+	for _, template := range []AttributeSet{public, private} {
+		if attr, ok := template[CkaParameterSet]; ok && pkcs11.BytesToULong(attr.Value) != paramSet {
+			return nil, fmt.Errorf("template CKA_PARAMETER_SET %#x conflicts with requested parameter set %#x",
+				pkcs11.BytesToULong(attr.Value), paramSet)
+		}
+	}
 	var k MLKEMKeyPair
 	err := c.withSession(func(session *pkcs11Session) error {
 		public.AddIfNotPresent([]*pkcs11.Attribute{
@@ -206,6 +222,7 @@ func (c *Context) GenerateMLKEMKeyPairWithAttributes(public, private AttributeSe
 		})
 		private.AddIfNotPresent([]*pkcs11.Attribute{
 			pkcs11.NewAttribute(pkcs11.CKA_TOKEN, true),
+			pkcs11.NewAttribute(pkcs11.CKA_PRIVATE, c.defaultPrivate()),
 			pkcs11.NewAttribute(pkcs11.CKA_SENSITIVE, true),
 			pkcs11.NewAttribute(pkcs11.CKA_EXTRACTABLE, false),
 			pkcs11.NewAttribute(pkcs11.CKA_DECAPSULATE, true),

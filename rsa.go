@@ -128,6 +128,7 @@ func (c *Context) GenerateRSAKeyPairWithAttributes(public, private AttributeSet,
 		})
 		private.AddIfNotPresent([]*pkcs11.Attribute{
 			pkcs11.NewAttribute(pkcs11.CKA_TOKEN, true),
+			pkcs11.NewAttribute(pkcs11.CKA_PRIVATE, c.defaultPrivate()),
 			pkcs11.NewAttribute(pkcs11.CKA_SIGN, true),
 			pkcs11.NewAttribute(pkcs11.CKA_DECRYPT, true),
 			pkcs11.NewAttribute(pkcs11.CKA_SENSITIVE, true),
@@ -145,7 +146,7 @@ func (c *Context) GenerateRSAKeyPairWithAttributes(public, private AttributeSet,
 
 		pub, err := exportRSAPublicKey(session, pubHandle)
 		if err != nil {
-			return err
+			return destroyKeyPair(session, pubHandle, privHandle, err)
 		}
 		k = &pkcs11PrivateKeyRSA{
 			pkcs11PrivateKey: pkcs11PrivateKey{
@@ -458,7 +459,14 @@ func (c *Context) FindAllRSAKeyPairs() ([]SignerDecrypter, error) {
 //
 // This completes the implemention of crypto.Decrypter for pkcs11PrivateKeyRSA.
 //
-// Note that the SessionKeyLen option (for PKCS#1v1.5 decryption) is not supported.
+// Prefer OAEP (rsa.OAEPOptions) for new designs. PKCS#1 v1.5 decryption —
+// selected by nil options or rsa.PKCS1v15DecryptOptions — is unpadded by the
+// token, and a caller that lets a remote party distinguish success from
+// failure, or time the two, exposes a Bleichenbacher padding oracle against
+// every ciphertext under the key. The stdlib's countermeasure, SessionKeyLen,
+// cannot be implemented on top of an HSM that reports the padding error, so
+// it is not supported and a nonzero value is an error. All v1.5 decryption
+// failures are reported as rsa.ErrDecryption, without the token's reason.
 //
 // The underlying PKCS#11 implementation may impose further restrictions.
 func (priv *pkcs11PrivateKeyRSA) Decrypt(_ io.Reader, ciphertext []byte, options crypto.DecrypterOpts) (plaintext []byte, err error) {
@@ -470,7 +478,7 @@ func (priv *pkcs11PrivateKeyRSA) Decrypt(_ io.Reader, ciphertext []byte, options
 			case *rsa.PKCS1v15DecryptOptions:
 				plaintext, err = decryptPKCS1v15(session, priv, ciphertext, o.SessionKeyLen)
 			case *rsa.OAEPOptions:
-				plaintext, err = decryptOAEP(session, priv, ciphertext, o.Hash, o.Label)
+				plaintext, err = decryptOAEP(session, priv, ciphertext, o.Hash, o.MGFHash, o.Label)
 			default:
 				err = errUnsupportedRSAOptions
 			}
@@ -488,13 +496,35 @@ func decryptPKCS1v15(session *pkcs11Session, key *pkcs11PrivateKeyRSA, ciphertex
 	if err := session.ctx.DecryptInit(session.handle, mech, key.handle); err != nil {
 		return nil, err
 	}
-	return session.ctx.Decrypt(session.handle, ciphertext)
+	plaintext, err := session.ctx.Decrypt(session.handle, ciphertext)
+	if err != nil {
+		// The token's reason — bad padding, wrong length — is exactly what a
+		// padding oracle is built from. Collapse it to the error crypto/rsa
+		// itself uses, unless the session is what failed: that one has to stay
+		// visible so the pool can recycle it.
+		var p11Err pkcs11.Error
+		if errors.As(err, &p11Err) && (p11Err == pkcs11.CKR_ENCRYPTED_DATA_INVALID || p11Err == pkcs11.CKR_ENCRYPTED_DATA_LEN_RANGE) {
+			return nil, rsa.ErrDecryption
+		}
+		return nil, err
+	}
+	return plaintext, nil
 }
 
-func decryptOAEP(session *pkcs11Session, key *pkcs11PrivateKeyRSA, ciphertext []byte, hashFunction crypto.Hash,
+func decryptOAEP(session *pkcs11Session, key *pkcs11PrivateKeyRSA, ciphertext []byte, hashFunction, mgfHash crypto.Hash,
 	label []byte) ([]byte, error) {
 
-	hashAlg, mgfAlg, _, err := hashToPKCS11(hashFunction)
+	hashAlg, _, _, err := hashToPKCS11(hashFunction)
+	if err != nil {
+		return nil, err
+	}
+	// rsa.OAEPOptions selects the MGF1 hash separately, defaulting to Hash
+	// only when it is zero. Deriving it from Hash unconditionally silently
+	// decrypted under different parameters than the caller asked for.
+	if mgfHash == 0 {
+		mgfHash = hashFunction
+	}
+	_, mgfAlg, _, err := hashToPKCS11(mgfHash)
 	if err != nil {
 		return nil, err
 	}
@@ -577,7 +607,21 @@ var pkcs1Prefix = map[crypto.Hash][]byte{
 
 func signPKCS1v15(session *pkcs11Session, key *pkcs11PrivateKeyRSA, digest []byte, hash crypto.Hash) (signature []byte, err error) {
 	/* Calculate T for EMSA-PKCS1-v1_5. */
-	oid := pkcs1Prefix[hash]
+	var oid []byte
+	if hash != 0 {
+		// crypto.Hash(0) asks for the digest to be signed as it is, without
+		// a DigestInfo — a legitimate request. A hash the table does not know
+		// is not: signing the bare digest then would produce a signature under
+		// a different algorithm than the one named, and the token cannot tell,
+		// since CKM_RSA_PKCS only ever sees the assembled bytes.
+		var ok bool
+		if oid, ok = pkcs1Prefix[hash]; !ok {
+			return nil, fmt.Errorf("%w: no PKCS#1 v1.5 DigestInfo for %v", errUnsupportedRSAOptions, hash)
+		}
+		if len(digest) != hash.Size() {
+			return nil, fmt.Errorf("digest is %d bytes; %v produces %d", len(digest), hash, hash.Size())
+		}
+	}
 	T := make([]byte, len(oid)+len(digest))
 	copy(T[0:len(oid)], oid)
 	copy(T[len(oid):], digest)

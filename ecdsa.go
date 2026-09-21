@@ -10,6 +10,7 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"encoding/asn1"
+	"fmt"
 	"io"
 	"math/big"
 
@@ -245,10 +246,22 @@ func (c *Context) GenerateECDSAKeyPairWithAttributes(public, private AttributeSe
 		})
 		private.AddIfNotPresent([]*pkcs11.Attribute{
 			pkcs11.NewAttribute(pkcs11.CKA_TOKEN, true),
+			pkcs11.NewAttribute(pkcs11.CKA_PRIVATE, c.defaultPrivate()),
 			pkcs11.NewAttribute(pkcs11.CKA_SIGN, true),
 			pkcs11.NewAttribute(pkcs11.CKA_SENSITIVE, true),
 			pkcs11.NewAttribute(pkcs11.CKA_EXTRACTABLE, false),
 		})
+
+		// The curve the token is asked for is the CKA_EC_PARAMS actually sent —
+		// the caller may have put its own in the template — not necessarily the
+		// curve argument. It has to be one whose public key can be exported,
+		// since a Signer cannot be built without it: finding that out after
+		// C_GenerateKeyPair used to leave two token objects behind on every
+		// attempt.
+		requested, err := unmarshalEcParams(public[CkaEcParams].Value)
+		if err != nil {
+			return err
+		}
 
 		mech := pkcs11.NewMechanism(pkcs11.CKM_ECDSA_KEY_PAIR_GEN, nil)
 		pubHandle, privHandle, err := session.ctx.GenerateKeyPair(session.handle,
@@ -261,7 +274,14 @@ func (c *Context) GenerateECDSAKeyPairWithAttributes(public, private AttributeSe
 
 		pub, err := exportECDSAPublicKey(session, pubHandle)
 		if err != nil {
-			return err
+			return destroyKeyPair(session, pubHandle, privHandle, err)
+		}
+		// The token's answer is checked against the request: a key on a weaker
+		// curve than asked for would otherwise be reported as a success at the
+		// requested strength.
+		if got := pub.(*ecdsa.PublicKey).Curve; got.Params().Name != requested.Params().Name {
+			return destroyKeyPair(session, pubHandle, privHandle,
+				fmt.Errorf("token generated a key on %s where %s was requested", got.Params().Name, requested.Params().Name))
 		}
 		k = &pkcs11PrivateKeyECDSA{
 			pkcs11PrivateKey: pkcs11PrivateKey{

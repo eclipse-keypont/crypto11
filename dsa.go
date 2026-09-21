@@ -45,7 +45,57 @@ func exportDSAPublicKey(session *pkcs11Session, pubHandle pkcs11.ObjectHandle) (
 		},
 		Y: &y,
 	}
+	if err := validateDSAPublicKey(&result); err != nil {
+		return nil, err
+	}
 	return &result, nil
+}
+
+// maxDSAPrimeBits bounds the size of a token-supplied DSA modulus before any
+// modular exponentiation is attempted on it. FIPS 186-4 defines L up to 3072;
+// the bound is loose so that unusual but legitimate parameters still load,
+// while an attribute of megabytes cannot pin the CPU.
+const maxDSAPrimeBits = 8192
+
+// validateDSAPublicKey rejects a DSA public key whose domain parameters or
+// public value are degenerate. The values come from the token, and Go's
+// dsa.Verify assumes it was handed valid parameters: with G = 1 and Y = 1 it
+// accepts (r, s) = (1, 1) as a signature over every digest, so a token — or
+// whatever wrote to it — that supplies such a key turns software verification
+// into a formality. The checks are the ones FIPS 186-4 A.2 / C.3 ask a verifier
+// to make: p and q prime, q | p-1, and both g and y of order q in Z_p*.
+func validateDSAPublicKey(pub *dsa.PublicKey) error {
+	p, q, g, y := pub.P, pub.Q, pub.G, pub.Y
+	one := big.NewInt(1)
+
+	if p.Sign() <= 0 || q.Sign() <= 0 || g.Sign() <= 0 || y.Sign() <= 0 {
+		return errors.New("DSA public key from token has a zero or negative component")
+	}
+	if p.BitLen() > maxDSAPrimeBits {
+		return errors.Errorf("DSA prime from token is %d bits; refusing more than %d", p.BitLen(), maxDSAPrimeBits)
+	}
+	if q.Cmp(p) >= 0 {
+		return errors.New("DSA subprime from token is not smaller than the prime")
+	}
+	if !p.ProbablyPrime(20) || !q.ProbablyPrime(20) {
+		return errors.New("DSA prime or subprime from token is not prime")
+	}
+	if new(big.Int).Mod(new(big.Int).Sub(p, one), q).Sign() != 0 {
+		return errors.New("DSA subprime from token does not divide p-1")
+	}
+	if g.Cmp(one) <= 0 || g.Cmp(p) >= 0 {
+		return errors.New("DSA generator from token is not in (1, p)")
+	}
+	if y.Cmp(one) <= 0 || y.Cmp(p) >= 0 {
+		return errors.New("DSA public value from token is not in (1, p)")
+	}
+	if new(big.Int).Exp(g, q, p).Cmp(one) != 0 {
+		return errors.New("DSA generator from token does not have order q")
+	}
+	if new(big.Int).Exp(y, q, p).Cmp(one) != 0 {
+		return errors.New("DSA public value from token is not in the subgroup of order q")
+	}
+	return nil
 }
 
 func notNilBytes(obj []byte, name string) error {
@@ -118,6 +168,7 @@ func (c *Context) GenerateDSAKeyPairWithAttributes(public, private AttributeSet,
 		})
 		private.AddIfNotPresent([]*pkcs11.Attribute{
 			pkcs11.NewAttribute(pkcs11.CKA_TOKEN, true),
+			pkcs11.NewAttribute(pkcs11.CKA_PRIVATE, c.defaultPrivate()),
 			pkcs11.NewAttribute(pkcs11.CKA_SIGN, true),
 			pkcs11.NewAttribute(pkcs11.CKA_SENSITIVE, true),
 			pkcs11.NewAttribute(pkcs11.CKA_EXTRACTABLE, false),
@@ -133,7 +184,12 @@ func (c *Context) GenerateDSAKeyPairWithAttributes(public, private AttributeSet,
 		}
 		pub, err := exportDSAPublicKey(session, pubHandle)
 		if err != nil {
-			return err
+			return destroyKeyPair(session, pubHandle, privHandle, err)
+		}
+		// And the domain parameters must be the ones that were asked for.
+		if got := pub.(*dsa.PublicKey).Parameters; got.P.Cmp(params.P) != 0 || got.Q.Cmp(params.Q) != 0 || got.G.Cmp(params.G) != 0 {
+			return destroyKeyPair(session, pubHandle, privHandle,
+				errors.New("token generated a DSA key under different domain parameters than requested"))
 		}
 		k = &pkcs11PrivateKeyDSA{
 			pkcs11PrivateKey: pkcs11PrivateKey{
