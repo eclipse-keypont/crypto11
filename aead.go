@@ -1,23 +1,6 @@
-// Copyright 2024 Thales Group
-//
-// Permission is hereby granted, free of charge, to any person obtaining
-// a copy of this software and associated documentation files (the
-// "Software"), to deal in the Software without restriction, including
-// without limitation the rights to use, copy, modify, merge, publish,
-// distribute, sublicense, and/or sell copies of the Software, and to
-// permit persons to whom the Software is furnished to do so, subject to
-// the following conditions:
-//
-// The above copyright notice and this permission notice shall be
-// included in all copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
-// EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
-// MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
-// NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE
-// LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
-// OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
-// WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+// SPDX-FileCopyrightText: 2026 Thales Group and the crypto11 Contributors
+// SPDX-FileCopyrightText: 2026 The Eclipse Foundation KeyPont project maintainers
+// SPDX-License-Identifier: MIT
 
 package crypto11
 
@@ -26,7 +9,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/miekg/pkcs11"
+	pkcs11 "github.com/eclipse-keypont/pkcs11-go/cryptoki"
 )
 
 // cipher.AEAD ----------------------------------------------------------
@@ -53,7 +36,7 @@ type genericAead struct {
 
 	// Note - if the GCMParams result is non-nil, the caller must call Free() on the params when
 	// finished.
-	makeMech func(nonce []byte, additionalData []byte, encrypt bool) ([]*pkcs11.Mechanism, *pkcs11.GCMParams, error)
+	makeMech func(nonce []byte, additionalData []byte, encrypt bool) (*pkcs11.Mechanism, *pkcs11.GCMParams, error)
 }
 
 // NewGCM returns a given cipher wrapped in Galois Counter Mode, with the standard
@@ -70,7 +53,7 @@ func (key *SecretKey) NewGCM() (cipher.AEAD, error) {
 		key:       key,
 		overhead:  16,
 		nonceSize: key.context.cfg.GCMIVLength,
-		makeMech: func(nonce []byte, additionalData []byte, encrypt bool) ([]*pkcs11.Mechanism, *pkcs11.GCMParams, error) {
+		makeMech: func(nonce []byte, additionalData []byte, encrypt bool) (*pkcs11.Mechanism, *pkcs11.GCMParams, error) {
 			var params *pkcs11.GCMParams
 
 			if (encrypt && key.context.cfg.UseGCMIVFromHSM &&
@@ -80,7 +63,7 @@ func (key *SecretKey) NewGCM() (cipher.AEAD, error) {
 			} else {
 				params = pkcs11.NewGCMParams(nonce, additionalData, 16*8 /*bits*/)
 			}
-			return []*pkcs11.Mechanism{pkcs11.NewMechanism(key.Cipher.GCMMech, params)}, params, nil
+			return pkcs11.NewMechanismWithParams(key.Cipher.GCMMech, params), params, nil
 		},
 	}
 	return g, nil
@@ -106,26 +89,34 @@ func (g genericAead) Seal(dst, nonce, plaintext, additionalData []byte) []byte {
 		defer params.Free()
 
 		if err = session.ctx.EncryptInit(session.handle, mech, g.key.handle); err != nil {
-			err = fmt.Errorf("C_EncryptInit: %v", err)
+			err = fmt.Errorf("C_EncryptInit: %w", err)
 			return
 		}
 		if result, err = session.ctx.Encrypt(session.handle, plaintext); err != nil {
-			err = fmt.Errorf("C_Encrypt: %v", err)
+			err = fmt.Errorf("C_Encrypt: %w", err)
 			return
 		}
 
-		if g.key.context.cfg.UseGCMIVFromHSM && g.key.context.cfg.GCMIVFromHSMControl.SupplyIvForHSMGCMEncrypt {
-			if len(nonce) != len(params.IV()) {
+		// When the token generates its own GCM IV (UseGCMIVFromHSM), the actual
+		// IV used is written by the token into the CK_GCM_PARAMS buffer. We MUST
+		// copy it back into the caller's nonce slice, otherwise the caller never
+		// learns the IV and the ciphertext cannot be decrypted — or, worse, the
+		// caller assumes a zero/garbage nonce was used, risking catastrophic GCM
+		// nonce reuse. This must happen whenever UseGCMIVFromHSM is set,
+		// independently of the SupplyIvForHSMGCMEncrypt buffer-management flag.
+		if g.key.context.cfg.UseGCMIVFromHSM {
+			hsmIV := params.IV()
+			if len(nonce) != len(hsmIV) {
 				return errBadGCMNonceSize
 			}
+			copy(nonce, hsmIV)
 		}
 
 		return
 	}); err != nil {
 		panic(err)
-	} else {
-		dst = append(dst, result...)
 	}
+	dst = append(dst, result...)
 	return dst
 }
 
@@ -139,11 +130,11 @@ func (g genericAead) Open(dst, nonce, ciphertext, additionalData []byte) ([]byte
 		defer params.Free()
 
 		if err = session.ctx.DecryptInit(session.handle, mech, g.key.handle); err != nil {
-			err = fmt.Errorf("C_DecryptInit: %v", err)
+			err = fmt.Errorf("C_DecryptInit: %w", err)
 			return
 		}
 		if result, err = session.ctx.Decrypt(session.handle, ciphertext); err != nil {
-			err = fmt.Errorf("C_Decrypt: %v", err)
+			err = fmt.Errorf("C_Decrypt: %w", err)
 			return
 		}
 		return

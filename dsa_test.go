@@ -1,23 +1,6 @@
-// Copyright 2024 Thales Group
-//
-// Permission is hereby granted, free of charge, to any person obtaining
-// a copy of this software and associated documentation files (the
-// "Software"), to deal in the Software without restriction, including
-// without limitation the rights to use, copy, modify, merge, publish,
-// distribute, sublicense, and/or sell copies of the Software, and to
-// permit persons to whom the Software is furnished to do so, subject to
-// the following conditions:
-//
-// The above copyright notice and this permission notice shall be
-// included in all copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
-// EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
-// MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
-// NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE
-// LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
-// OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
-// WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+// SPDX-FileCopyrightText: 2026 Thales Group and the crypto11 Contributors
+// SPDX-FileCopyrightText: 2026 The Eclipse Foundation KeyPont project maintainers
+// SPDX-License-Identifier: MIT
 
 package crypto11
 
@@ -32,6 +15,7 @@ import (
 	"math/big"
 	"testing"
 
+	pkcs11 "github.com/eclipse-keypont/pkcs11-go/cryptoki"
 	"github.com/stretchr/testify/require"
 )
 
@@ -68,7 +52,7 @@ func dsaParameters(p, q, g string) *dsa.Parameters {
 
 type DSAPrivateKey dsa.PrivateKey
 
-func (signer *DSAPrivateKey) Sign(rand io.Reader, digest []byte, opts crypto.SignerOpts) ([]byte, error) {
+func (signer *DSAPrivateKey) Sign(rand io.Reader, digest []byte, _ crypto.SignerOpts) ([]byte, error) {
 	key := (*dsa.PrivateKey)(signer)
 	var sig dsaSignature
 	var err error
@@ -103,13 +87,9 @@ func TestNativeDSA(t *testing.T) {
 func TestHardDSA(t *testing.T) {
 	skipTest(t, skipTestDSA)
 
-	ctx, err := ConfigureFromFile("config")
-	require.NoError(t, err)
+	ctx := testContext(t)
 
-	defer func() {
-		err = ctx.Close()
-		require.NoError(t, err)
-	}()
+	skipIfMechUnsupported(t, ctx, pkcs11.CKM_DSA_KEY_PAIR_GEN)
 
 	for pSize, params := range dsaSizes {
 
@@ -177,21 +157,16 @@ func testDsaSigningWithHash(t *testing.T, key crypto.Signer, hashFunction crypto
 	err = sig.unmarshalDER(sigDER)
 	require.NoError(t, err)
 
-	dsaPubkey := key.Public().(crypto.PublicKey).(*dsa.PublicKey)
+	dsaPubkey := key.Public().(*dsa.PublicKey)
 	if !dsa.Verify(dsaPubkey, plaintextHash, sig.R, sig.S) {
 		t.Errorf("DSA %s Verify failed (psize %d hash %v)", what, psize, hashFunction)
 	}
 }
 
 func TestDsaRequiredArgs(t *testing.T) {
-	ctx, err := ConfigureFromFile("config")
-	require.NoError(t, err)
+	ctx := testContext(t)
 
-	defer func() {
-		require.NoError(t, ctx.Close())
-	}()
-
-	_, err = ctx.GenerateDSAKeyPair(nil, dsaSizes[dsa.L2048N224])
+	_, err := ctx.GenerateDSAKeyPair(nil, dsaSizes[dsa.L2048N224])
 	require.Error(t, err)
 
 	val := randomBytes()

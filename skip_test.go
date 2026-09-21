@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2026 Thales Group and the crypto11 Contributors
+// SPDX-FileCopyrightText: 2026 The Eclipse Foundation KeyPont project maintainers
+// SPDX-License-Identifier: MIT
+
 package crypto11
 
 import (

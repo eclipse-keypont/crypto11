@@ -1,72 +1,22 @@
-// Copyright 2024 Thales Group
-//
-// Permission is hereby granted, free of charge, to any person obtaining
-// a copy of this software and associated documentation files (the
-// "Software"), to deal in the Software without restriction, including
-// without limitation the rights to use, copy, modify, merge, publish,
-// distribute, sublicense, and/or sell copies of the Software, and to
-// permit persons to whom the Software is furnished to do so, subject to
-// the following conditions:
-//
-// The above copyright notice and this permission notice shall be
-// included in all copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
-// EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
-// MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
-// NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE
-// LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
-// OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
-// WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+// SPDX-FileCopyrightText: 2026 Thales Group and the crypto11 Contributors
+// SPDX-FileCopyrightText: 2026 The Eclipse Foundation KeyPont project maintainers
+// SPDX-License-Identifier: MIT
 
 package crypto11
 
 import (
-	"C"
 	"encoding/asn1"
 	"math/big"
-	"unsafe"
 
-	"github.com/miekg/pkcs11"
+	pkcs11 "github.com/eclipse-keypont/pkcs11-go/cryptoki"
 	"github.com/pkg/errors"
 )
 
-func ulongToBytes(n uint) []byte {
-	return C.GoBytes(unsafe.Pointer(&n), C.sizeof_ulong) // ugh!
-}
-
-func bytesToUlong(bs []byte) (n uint) {
-	sliceSize := len(bs)
-	if sliceSize == 0 {
-		return 0
-	}
-
-	value := *(*uint)(unsafe.Pointer(&bs[0]))
-	if sliceSize > C.sizeof_ulong {
-		return value
-	}
-
-	// truncate the value to the # of bits present in the byte slice since
-	// the unsafe pointer will always grab/convert ULONG # of bytes
-	var mask uint
-	for i := 0; i < sliceSize; i++ {
-		mask |= 0xff << uint(i*8)
-	}
-	return value & mask
-}
-
-func concat(slices ...[]byte) []byte {
-	n := 0
-	for _, slice := range slices {
-		n += len(slice)
-	}
-	r := make([]byte, n)
-	n = 0
-	for _, slice := range slices {
-		n += copy(r[n:], slice)
-	}
-	return r
-}
+// CK_ULONG conversions live in the pkcs11-go binding, as pkcs11.ULongToBytes
+// and pkcs11.BytesToULong. Its width is a property of the C ABI — 8 bytes under
+// LP64, 4 under Windows' LLP64 model — so it belongs in the one package that
+// holds the PKCS#11 headers. Keeping a copy here meant importing "C" for a
+// single constant, and getting it wrong on Windows.
 
 // Representation of a *DSA signature
 type dsaSignature struct {
@@ -105,7 +55,7 @@ func (c *Context) dsaGeneric(key pkcs11.ObjectHandle, mechanism uint, digest []b
 	var err error
 	var sigBytes []byte
 	var sig dsaSignature
-	mech := []*pkcs11.Mechanism{pkcs11.NewMechanism(mechanism, nil)}
+	mech := pkcs11.NewMechanism(mechanism, nil)
 	err = c.withSession(func(session *pkcs11Session) error {
 		if err = c.ctx.SignInit(session.handle, mech, key); err != nil {
 			return err

@@ -1,23 +1,6 @@
-// Copyright 2024 Thales Group
-//
-// Permission is hereby granted, free of charge, to any person obtaining
-// a copy of this software and associated documentation files (the
-// "Software"), to deal in the Software without restriction, including
-// without limitation the rights to use, copy, modify, merge, publish,
-// distribute, sublicense, and/or sell copies of the Software, and to
-// permit persons to whom the Software is furnished to do so, subject to
-// the following conditions:
-//
-// The above copyright notice and this permission notice shall be
-// included in all copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
-// EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
-// MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
-// NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE
-// LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
-// OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
-// WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+// SPDX-FileCopyrightText: 2026 Thales Group and the crypto11 Contributors
+// SPDX-FileCopyrightText: 2026 The Eclipse Foundation KeyPont project maintainers
+// SPDX-License-Identifier: MIT
 
 package crypto11
 
@@ -25,7 +8,7 @@ import (
 	"errors"
 	"hash"
 
-	"github.com/miekg/pkcs11"
+	pkcs11 "github.com/eclipse-keypont/pkcs11-go/cryptoki"
 )
 
 const (
@@ -68,7 +51,7 @@ type hmacImplementation struct {
 	blockSize int
 
 	// PKCS#11 mechanism information
-	mechDescription []*pkcs11.Mechanism
+	mechDescription *pkcs11.Mechanism
 
 	// Cleanup function
 	cleanup func()
@@ -120,6 +103,13 @@ var errHmacClosed = errors.New("already called Sum()")
 //
 // The Reset() method is not implemented.
 // After Sum() is called no new data may be added.
+//
+// Failure handling: the returned hash.Hash cannot report errors through Sum,
+// whose signature is fixed by the interface. If the underlying HSM operation
+// fails (for example the session is lost mid-operation), Write returns an error
+// and a subsequent Sum panics rather than returning a bogus MAC. Callers that
+// must tolerate HSM faults should surface the Write error and/or wrap Sum in a
+// recover().
 func (key *SecretKey) NewHMAC(mech int, length int) (hash.Hash, error) {
 	hi := hmacImplementation{
 		key: key,
@@ -129,14 +119,14 @@ func (key *SecretKey) NewHMAC(mech int, length int) (hash.Hash, error) {
 		hi.blockSize = info.blockSize
 		if info.general {
 			hi.size = length
-			params = ulongToBytes(uint(length))
+			params = pkcs11.ULongToBytes(uint(length))
 		} else {
 			hi.size = info.size
 		}
 	} else {
 		hi.size = length
 	}
-	hi.mechDescription = []*pkcs11.Mechanism{pkcs11.NewMechanism(uint(mech), params)}
+	hi.mechDescription = pkcs11.NewMechanism(uint(mech), params)
 	if err := hi.initialize(); err != nil {
 		return nil, err
 	}
@@ -150,7 +140,14 @@ func (hi *hmacImplementation) initialize() (err error) {
 	}
 
 	hi.session = session
+	// Idempotent: a multi-part HMAC can fail at several points, each of which must
+	// release the session. Returning the same session to the pool twice would hand it
+	// to two concurrent callers (session-state corruption / cross-operation leakage),
+	// so guard on the nil sentinel.
 	hi.cleanup = func() {
+		if hi.session == nil {
+			return
+		}
 		hi.key.context.pool.Put(session)
 		hi.session = nil
 	}
@@ -170,7 +167,15 @@ func (hi *hmacImplementation) Write(p []byte) (n int, err error) {
 		}
 		return
 	}
+	if hi.session == nil {
+		// A previous step failed and released the session; the operation is dead.
+		err = errHmacClosed
+		return
+	}
 	if err = hi.session.ctx.SignUpdate(hi.session.handle, p); err != nil {
+		// The operation is dead. Release the session now, because Sum (which normally
+		// performs cleanup) will not be reached.
+		hi.cleanup()
 		return
 	}
 	hi.updates++
@@ -180,11 +185,18 @@ func (hi *hmacImplementation) Write(p []byte) (n int, err error) {
 
 func (hi *hmacImplementation) Sum(b []byte) []byte {
 	if hi.result == nil {
+		if hi.session == nil {
+			// A previous step failed and released the session, so there is no result.
+			// Returning a zero-length value would silently yield a bogus HMAC; panic to
+			// match the existing finalize-failure behaviour instead.
+			panic(errHmacClosed)
+		}
 		var err error
 		if hi.updates == 0 {
 			// http://docs.oasis-open.org/pkcs11/pkcs11-base/v2.40/os/pkcs11-base-v2.40-os.html#_Toc322855304
 			// We must ensure that C_SignUpdate is called _at least once_.
 			if err = hi.session.ctx.SignUpdate(hi.session.handle, []byte{}); err != nil {
+				hi.cleanup()
 				panic(err)
 			}
 		}

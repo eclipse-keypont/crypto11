@@ -1,23 +1,6 @@
-// Copyright 2024 Thales Group
-//
-// Permission is hereby granted, free of charge, to any person obtaining
-// a copy of this software and associated documentation files (the
-// "Software"), to deal in the Software without restriction, including
-// without limitation the rights to use, copy, modify, merge, publish,
-// distribute, sublicense, and/or sell copies of the Software, and to
-// permit persons to whom the Software is furnished to do so, subject to
-// the following conditions:
-//
-// The above copyright notice and this permission notice shall be
-// included in all copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
-// EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
-// MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
-// NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE
-// LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
-// OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
-// WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+// SPDX-FileCopyrightText: 2026 Thales Group and the crypto11 Contributors
+// SPDX-FileCopyrightText: 2026 The Eclipse Foundation KeyPont project maintainers
+// SPDX-License-Identifier: MIT
 
 package crypto11
 
@@ -30,7 +13,7 @@ import (
 	"io"
 	"math/big"
 
-	"github.com/miekg/pkcs11"
+	pkcs11 "github.com/eclipse-keypont/pkcs11-go/cryptoki"
 )
 
 // errMalformedRSAPublicKey is returned when an RSA public key is not in a suitable form.
@@ -41,9 +24,9 @@ var errMalformedRSAPublicKey = errors.New("malformed RSA public key")
 
 // errUnsupportedRSAOptions is returned when an unsupported RSA option is requested.
 //
-// Currently this means a nontrivial SessionKeyLen when decrypting; or
-// an unsupported hash function; or crypto.rsa.PSSSaltLengthAuto was
-// requested.
+// Currently this means a nontrivial SessionKeyLen when decrypting; an
+// unsupported hash function; or crypto.rsa.PSSSaltLengthAuto requested
+// for a key whose public half is not an RSA public key.
 var errUnsupportedRSAOptions = errors.New("unsupported RSA option value")
 
 // pkcs11PrivateKeyRSA contains a reference to a loaded PKCS#11 RSA private key object.
@@ -82,7 +65,7 @@ func exportRSAPublicKey(session *pkcs11Session, pubHandle pkcs11.ObjectHandle) (
 	return &result, nil
 }
 
-func (k *pkcs11PrivateKeyRSA) KeyType() uint {
+func (priv *pkcs11PrivateKeyRSA) KeyType() uint {
 	return pkcs11.CKK_RSA
 }
 
@@ -151,7 +134,7 @@ func (c *Context) GenerateRSAKeyPairWithAttributes(public, private AttributeSet,
 			pkcs11.NewAttribute(pkcs11.CKA_EXTRACTABLE, false),
 		})
 
-		mech := []*pkcs11.Mechanism{pkcs11.NewMechanism(pkcs11.CKM_RSA_PKCS_KEY_PAIR_GEN, nil)}
+		mech := pkcs11.NewMechanism(pkcs11.CKM_RSA_PKCS_KEY_PAIR_GEN, nil)
 		pubHandle, privHandle, err := session.ctx.GenerateKeyPair(session.handle,
 			mech,
 			public.ToSlice(),
@@ -186,7 +169,7 @@ func (c *Context) makeRSAPrivateKey(session *pkcs11Session, privHandle *pkcs11.O
 	if attributes, err = session.ctx.GetAttributeValue(session.handle, *privHandle, attributes); err != nil {
 		return nil, err
 	}
-	keyType := bytesToUlong(attributes[0].Value)
+	keyType := pkcs11.BytesToULong(attributes[0].Value)
 
 	resultPkcs11PrivateKey := pkcs11PrivateKey{
 		pkcs11Object: pkcs11Object{
@@ -201,7 +184,7 @@ func (c *Context) makeRSAPrivateKey(session *pkcs11Session, privHandle *pkcs11.O
 		return result, nil
 
 	default:
-		return nil, fmt.Errorf("not an RSA key type: %w", err)
+		return nil, fmt.Errorf("not an RSA key type: %X: %w", keyType, errUnsupportedKeyType)
 	}
 }
 
@@ -262,6 +245,7 @@ func (c *Context) FindRSAPrivateKeys(id []byte, label []byte) (pks []RSAPrivateK
 // FindRSAPrivateKeysWithAttributes retrieves previously created asymmetric RSA private keys,
 // or nil if none can be found.
 // The given attributes are matched against the private half only.
+// Private keys that are not RSA are skipped.
 // This method is specific to rsa only because it is the only supported type able to decrypt and
 // sign.
 func (c *Context) FindRSAPrivateKeysWithAttributes(attributes AttributeSet) (pks []RSAPrivateKey, err error) {
@@ -290,6 +274,9 @@ func (c *Context) FindRSAPrivateKeysWithAttributes(attributes AttributeSet) (pks
 
 		for _, privHandle := range privHandles {
 			k, err := c.makeRSAPrivateKey(session, &privHandle)
+			if errors.Is(err, errUnsupportedKeyType) {
+				continue
+			}
 			if err != nil {
 				return err
 			}
@@ -325,14 +312,14 @@ func (c *Context) makeRSAKeyPair(session *pkcs11Session, privHandle *pkcs11.Obje
 			if pub, err = exportRSAPublicKey(session, *pubHandle); err != nil {
 				return nil, nil, err
 			}
-			result.pkcs11PrivateKey.pubKeyHandle = *pubHandle
+			result.pubKeyHandle = *pubHandle
 		}
 
-		result.pkcs11PrivateKey.pubKey = pub
+		result.pubKey = pub
 		return result, certificate, nil
 
 	default:
-		return nil, nil, fmt.Errorf("not an RSA key pair: %X", keyType)
+		return nil, nil, fmt.Errorf("not an RSA key pair: %X: %w", keyType, errUnsupportedKeyType)
 	}
 }
 
@@ -364,7 +351,7 @@ func (c *Context) FindRSAKeyPair(id []byte, label []byte) (SignerDecrypter, erro
 // Only private keys that have a non-empty CKA_ID will be found, as this is required to locate the
 // matching public key.
 // If the private key is found, but the public key with a corresponding CKA_ID is not, the key is
-// not returned because we cannot implement crypto.Signer of SignerDecrypter without the public key.
+// not returned because we cannot implement crypto.Signer or SignerDecrypter without the public key.
 func (c *Context) FindRSAKeyPairs(id []byte, label []byte) (signer []SignerDecrypter, err error) {
 	if c.closed.Get() {
 		return nil, errClosed
@@ -389,18 +376,19 @@ func (c *Context) FindRSAKeyPairs(id []byte, label []byte) (signer []SignerDecry
 		}
 	}
 
-	return c.FindKeyRSAPairsWithAttributes(attributes)
+	return c.FindRSAKeyPairsWithAttributes(attributes)
 }
 
-// FindKeyRSAPairsWithAttributes retrieves previously created RSA asymmetric key pairs, or nil if
+// FindRSAKeyPairsWithAttributes retrieves previously created RSA asymmetric key pairs, or nil if
 // none can be found.
 // The given attributes are matched against the private half only. Then the public half with a
 // matching CKA_ID and CKA_LABEL values is found.
 // Only private keys that have a non-empty CKA_ID will be found, as this is required to locate the
 // matching public key.
 // If the private key is found, but the public key with a corresponding CKA_ID is not, the key is
-// not returned because we cannot implement crypto.Signer of SignerDecrypter without the public key.
-func (c *Context) FindKeyRSAPairsWithAttributes(attributes AttributeSet) (signer []SignerDecrypter, err error) {
+// not returned because we cannot implement crypto.Signer or SignerDecrypter without the public key.
+// Private keys that are not RSA are skipped.
+func (c *Context) FindRSAKeyPairsWithAttributes(attributes AttributeSet) (signer []SignerDecrypter, err error) {
 	if c.closed.Get() {
 		return nil, errClosed
 	}
@@ -427,7 +415,8 @@ func (c *Context) FindKeyRSAPairsWithAttributes(attributes AttributeSet) (signer
 		for _, privHandle := range privHandles {
 			k, _, err := c.makeRSAKeyPair(session, &privHandle)
 
-			if errors.Is(err, errNoCkaId) || errors.Is(err, errNoPublicHalf) {
+			if errors.Is(err, errNoCkaID) || errors.Is(err, errNoPublicHalf) ||
+				errors.Is(err, errUnsupportedKeyType) {
 				continue
 			}
 			if err != nil {
@@ -447,6 +436,24 @@ func (c *Context) FindKeyRSAPairsWithAttributes(attributes AttributeSet) (signer
 	return keys, nil
 }
 
+// FindAllRSAKeyPairs retrieves all existing RSA asymmetric key pairs, or a nil slice if none can be
+// found. It is the decryption-capable counterpart of FindAllKeyPairs: every returned key is a
+// SignerDecrypter, so this is the one-call form of "give me everything on this token I can decrypt
+// with".
+//
+// Only private keys that have a non-empty CKA_ID will be found, as this is required to locate the
+// matching public key.
+// If the private key is found, but the public key with a corresponding CKA_ID is not, the key is
+// not returned because we cannot implement crypto.Signer or SignerDecrypter without the public key.
+// Private keys that are not RSA are skipped.
+func (c *Context) FindAllRSAKeyPairs() ([]SignerDecrypter, error) {
+	if c.closed.Get() {
+		return nil, errClosed
+	}
+
+	return c.FindRSAKeyPairsWithAttributes(NewAttributeSet())
+}
+
 // Decrypt decrypts a message using a RSA key.
 //
 // This completes the implemention of crypto.Decrypter for pkcs11PrivateKeyRSA.
@@ -454,7 +461,7 @@ func (c *Context) FindKeyRSAPairsWithAttributes(attributes AttributeSet) (signer
 // Note that the SessionKeyLen option (for PKCS#1v1.5 decryption) is not supported.
 //
 // The underlying PKCS#11 implementation may impose further restrictions.
-func (priv *pkcs11PrivateKeyRSA) Decrypt(rand io.Reader, ciphertext []byte, options crypto.DecrypterOpts) (plaintext []byte, err error) {
+func (priv *pkcs11PrivateKeyRSA) Decrypt(_ io.Reader, ciphertext []byte, options crypto.DecrypterOpts) (plaintext []byte, err error) {
 	err = priv.context.withSession(func(session *pkcs11Session) error {
 		if options == nil {
 			plaintext, err = decryptPKCS1v15(session, priv, ciphertext, 0)
@@ -477,7 +484,7 @@ func decryptPKCS1v15(session *pkcs11Session, key *pkcs11PrivateKeyRSA, ciphertex
 	if sessionKeyLen != 0 {
 		return nil, errUnsupportedRSAOptions
 	}
-	mech := []*pkcs11.Mechanism{pkcs11.NewMechanism(pkcs11.CKM_RSA_PKCS, nil)}
+	mech := pkcs11.NewMechanism(pkcs11.CKM_RSA_PKCS, nil)
 	if err := session.ctx.DecryptInit(session.handle, mech, key.handle); err != nil {
 		return nil, err
 	}
@@ -492,10 +499,10 @@ func decryptOAEP(session *pkcs11Session, key *pkcs11PrivateKeyRSA, ciphertext []
 		return nil, err
 	}
 
-	mech := pkcs11.NewMechanism(pkcs11.CKM_RSA_PKCS_OAEP,
+	mech := pkcs11.NewMechanismWithParams(pkcs11.CKM_RSA_PKCS_OAEP,
 		pkcs11.NewOAEPParams(hashAlg, mgfAlg, pkcs11.CKZ_DATA_SPECIFIED, label))
 
-	err = session.ctx.DecryptInit(session.handle, []*pkcs11.Mechanism{mech}, key.handle)
+	err = session.ctx.DecryptInit(session.handle, mech, key.handle)
 	if err != nil {
 		return nil, err
 	}
@@ -519,6 +526,21 @@ func hashToPKCS11(hashFunction crypto.Hash) (hashAlg uint, mgfAlg uint, hashLen 
 	}
 }
 
+// maxPSSSaltLength resolves rsa.PSSSaltLengthAuto to the largest salt the
+// modulus can carry, the same value crypto/rsa picks: emLen - hLen - 2, with
+// emLen derived from the bit length of the modulus.
+func maxPSSSaltLength(pubKey crypto.PublicKey, hLen uint) (uint, error) {
+	pub, ok := pubKey.(*rsa.PublicKey)
+	if !ok {
+		return 0, errUnsupportedRSAOptions
+	}
+	sLen := (pub.N.BitLen()-1+7)/8 - 2 - int(hLen)
+	if sLen < 0 {
+		return 0, rsa.ErrMessageTooLong
+	}
+	return uint(sLen), nil
+}
+
 func signPSS(session *pkcs11Session, key *pkcs11PrivateKeyRSA, digest []byte, opts *rsa.PSSOptions) ([]byte, error) {
 	var hMech, mgf, hLen, sLen uint
 	var err error
@@ -526,22 +548,19 @@ func signPSS(session *pkcs11Session, key *pkcs11PrivateKeyRSA, digest []byte, op
 		return nil, err
 	}
 	switch opts.SaltLength {
-	case rsa.PSSSaltLengthAuto: // parseltongue constant
-		// TODO we could (in principle) work out the biggest
-		// possible size from the key, but until someone has
-		// the effort to do that...
-		return nil, errUnsupportedRSAOptions
+	case rsa.PSSSaltLengthAuto:
+		if sLen, err = maxPSSSaltLength(key.pubKey, hLen); err != nil {
+			return nil, err
+		}
 	case rsa.PSSSaltLengthEqualsHash:
 		sLen = hLen
 	default:
 		sLen = uint(opts.SaltLength)
 	}
-	// TODO this is pretty horrible, maybe the PKCS#11 wrapper
-	// could be improved to help us out here
-	parameters := concat(ulongToBytes(hMech),
-		ulongToBytes(mgf),
-		ulongToBytes(sLen))
-	mech := []*pkcs11.Mechanism{pkcs11.NewMechanism(pkcs11.CKM_RSA_PKCS_PSS, parameters)}
+	// The binding marshals CK_RSA_PKCS_PSS_PARAMS itself, so we no longer have
+	// to hand-pack three CK_ULONGs and hope the layout matches the token's.
+	mech := pkcs11.NewMechanismWithParams(pkcs11.CKM_RSA_PKCS_PSS,
+		pkcs11.NewPSSParams(hMech, mgf, int(sLen)))
 	if err = session.ctx.SignInit(session.handle, mech, key.handle); err != nil {
 		return nil, err
 	}
@@ -562,7 +581,7 @@ func signPKCS1v15(session *pkcs11Session, key *pkcs11PrivateKeyRSA, digest []byt
 	T := make([]byte, len(oid)+len(digest))
 	copy(T[0:len(oid)], oid)
 	copy(T[len(oid):], digest)
-	mech := []*pkcs11.Mechanism{pkcs11.NewMechanism(pkcs11.CKM_RSA_PKCS, nil)}
+	mech := pkcs11.NewMechanism(pkcs11.CKM_RSA_PKCS, nil)
 	err = session.ctx.SignInit(session.handle, mech, key.handle)
 	if err == nil {
 		signature, err = session.ctx.Sign(session.handle, T)
@@ -576,16 +595,16 @@ func signPKCS1v15(session *pkcs11Session, key *pkcs11PrivateKeyRSA, digest []byt
 //
 // PKCS#11 expects to pick its own random data where necessary for signatures, so the rand argument is ignored.
 //
-// Note that (at present) the crypto.rsa.PSSSaltLengthAuto option is
-// not supported. The caller must either use
-// crypto.rsa.PSSSaltLengthEqualsHash (recommended) or pass an
-// explicit salt length. Moreover the underlying PKCS#11
-// implementation may impose further restrictions.
-func (priv *pkcs11PrivateKeyRSA) Sign(rand io.Reader, digest []byte, opts crypto.SignerOpts) (signature []byte, err error) {
+// For PSS signatures, crypto.rsa.PSSSaltLengthAuto is resolved to the
+// largest salt the modulus can carry, as crypto/rsa does; callers may
+// also use crypto.rsa.PSSSaltLengthEqualsHash or an explicit salt
+// length. Note that the underlying PKCS#11 implementation may impose
+// further restrictions on the salt length it accepts.
+func (priv *pkcs11PrivateKeyRSA) Sign(_ io.Reader, digest []byte, opts crypto.SignerOpts) (signature []byte, err error) {
 	err = priv.context.withSession(func(session *pkcs11Session) error {
-		switch opts.(type) {
+		switch opts := opts.(type) {
 		case *rsa.PSSOptions:
-			signature, err = signPSS(session, priv, digest, opts.(*rsa.PSSOptions))
+			signature, err = signPSS(session, priv, digest, opts)
 		default: /* PKCS1-v1_5 */
 			signature, err = signPKCS1v15(session, priv, digest, opts.HashFunc())
 		}

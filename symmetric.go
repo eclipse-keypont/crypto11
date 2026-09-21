@@ -1,30 +1,13 @@
-// Copyright 2024 Thales Group
-//
-// Permission is hereby granted, free of charge, to any person obtaining
-// a copy of this software and associated documentation files (the
-// "Software"), to deal in the Software without restriction, including
-// without limitation the rights to use, copy, modify, merge, publish,
-// distribute, sublicense, and/or sell copies of the Software, and to
-// permit persons to whom the Software is furnished to do so, subject to
-// the following conditions:
-//
-// The above copyright notice and this permission notice shall be
-// included in all copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
-// EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
-// MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
-// NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE
-// LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
-// OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
-// WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+// SPDX-FileCopyrightText: 2026 Thales Group and the crypto11 Contributors
+// SPDX-FileCopyrightText: 2026 The Eclipse Foundation KeyPont project maintainers
+// SPDX-License-Identifier: MIT
 
 package crypto11
 
 import (
 	"errors"
 
-	"github.com/miekg/pkcs11"
+	pkcs11 "github.com/eclipse-keypont/pkcs11-go/cryptoki"
 )
 
 // SymmetricGenParams holds a consistent (key type, mechanism) key generation pair.
@@ -266,7 +249,7 @@ func (c *Context) GenerateSecretKey(id []byte, bits int, cipher *SymmetricCipher
 	return c.GenerateSecretKeyWithAttributes(template, bits, cipher)
 }
 
-// GenerateSecretKey creates an secret key of given length and type. The id and label parameters are used to
+// GenerateSecretKeyWithLabel creates an secret key of given length and type. The id and label parameters are used to
 // set CKA_ID and CKA_LABEL respectively and must be non-nil.
 func (c *Context) GenerateSecretKeyWithLabel(id, label []byte, bits int, cipher *SymmetricCipher) (*SecretKey, error) {
 	if c.closed.Get() {
@@ -313,7 +296,7 @@ func (c *Context) GenerateSecretKeyWithAttributes(template AttributeSet, bits in
 
 			_ = template.Set(CkaKeyType, genMech.KeyType)
 
-			mech := []*pkcs11.Mechanism{pkcs11.NewMechanism(genMech.GenMech, nil)}
+			mech := pkcs11.NewMechanism(genMech.GenMech, nil)
 
 			privHandle, err := session.ctx.GenerateKey(session.handle, mech, template.ToSlice())
 			if err == nil {
@@ -323,7 +306,8 @@ func (c *Context) GenerateSecretKeyWithAttributes(template AttributeSet, bits in
 
 			// As a special case, AWS CloudHSM does not accept CKA_ENCRYPT and CKA_DECRYPT on a
 			// Generic Secret key. If we are in that special case, try again without those attributes.
-			if e, ok := err.(pkcs11.Error); ok && e == pkcs11.CKR_ARGUMENTS_BAD && genMech.GenMech == pkcs11.CKM_GENERIC_SECRET_KEY_GEN {
+			var e pkcs11.Error
+			if errors.As(err, &e) && e == pkcs11.CKR_ARGUMENTS_BAD && genMech.GenMech == pkcs11.CKM_GENERIC_SECRET_KEY_GEN {
 				adjustedTemplate := template.Copy()
 				adjustedTemplate.Unset(CkaEncrypt)
 				adjustedTemplate.Unset(CkaDecrypt)
@@ -344,10 +328,16 @@ func (c *Context) GenerateSecretKeyWithAttributes(template AttributeSet, bits in
 				return err
 			}
 
-			// nShield returns CKR_TEMPLATE_INCONSISTENT if if doesn't like the CKK/CKM combination.
-			// AWS CloudHSM returns CKR_ATTRIBUTE_VALUE_INVALID in the same circumstances.
-			if e, ok := err.(pkcs11.Error); ok &&
-				e == pkcs11.CKR_TEMPLATE_INCONSISTENT || e == pkcs11.CKR_ATTRIBUTE_VALUE_INVALID {
+			// A token that doesn't recognise this CKK/CKM pairing should fall through to
+			// the next GenParams entry (e.g. the generic-secret fallback). The rejection
+			// code varies by vendor for the vendor-specific HMAC key-gen mechs: nShield
+			// returns CKR_TEMPLATE_INCONSISTENT, AWS CloudHSM CKR_ATTRIBUTE_VALUE_INVALID,
+			// SoftHSM CKR_MECHANISM_INVALID, and Utimaco CKR_ATTRIBUTE_TYPE_INVALID.
+			if errors.As(err, &e) &&
+				(e == pkcs11.CKR_TEMPLATE_INCONSISTENT ||
+					e == pkcs11.CKR_ATTRIBUTE_VALUE_INVALID ||
+					e == pkcs11.CKR_MECHANISM_INVALID ||
+					e == pkcs11.CKR_ATTRIBUTE_TYPE_INVALID) {
 				continue
 			}
 

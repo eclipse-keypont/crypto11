@@ -1,0 +1,67 @@
+# golangci-lint configuration (v2 schema).
+# Run locally with: golangci-lint run
+# Docs: https://golangci-lint.run/
+version: "2"
+
+linters:
+  enable:
+    # Defaults (errcheck, govet, ineffassign, staticcheck, unused) stay on.
+    - bodyclose      # checks HTTP response bodies are closed
+    - gosec          # security-focused checks (relevant for a crypto lib)
+    - misspell       # catches common spelling mistakes in comments/strings
+    - revive         # fast, configurable replacement for golint
+    - unconvert      # flags unnecessary type conversions
+    - unparam        # reports unused function parameters
+    - errorlint      # finds problems with Go 1.13+ error wrapping
+    - nilerr         # returning nil when an error is non-nil
+    - copyloopvar    # detects unnecessary loop-var copies (Go 1.22+)
+    - prealloc       # suggests slice preallocation
+
+  settings:
+    gosec:
+      excludes:
+        # G115: integer overflow on conversion — extremely noisy against the
+        # PKCS#11 C-style API (CK_ULONG <-> int). Re-enable if you want to
+        # audit those conversions explicitly.
+        - G115
+
+  exclusions:
+    generated: lax
+    rules:
+      # Test files exercise edge cases and intentionally ignore some errors.
+      - path: _test\.go
+        linters:
+          - errcheck
+          - gosec
+          - unparam
+
+      # These consts/vars mirror the PKCS#11 CK_ naming convention (CKA_*, CKM_*,
+      # CKK_*) used throughout the pkcs11 package this library wraps, and several
+      # are part of the exported API. Renaming them to idiomatic Go casing would
+      # be a breaking change for consumers and would diverge from upstream PKCS#11
+      # naming that callers cross-reference against the spec.
+      - path: attributes\.go
+        linters: [revive]
+        text: "var-naming: (const CkaObjectId should be CkaObjectID|const CkaUrl should be CkaURL|const CkaId should be CkaID)"
+      - path: hmac\.go
+        linters: [revive]
+        text: "var-naming: don't use ALL_CAPS in Go names"
+
+      # DSA is legacy but still required for HSM interop with tokens that only
+      # support it; elliptic.Unmarshal is used for EC point parsing predating
+      # crypto/ecdh. Both are deliberate, not oversights.
+      - path: (dsa|dsa_test|close_test)\.go
+        linters: [staticcheck]
+        text: "SA1019.*crypto/dsa"
+      - path: ecdsa\.go
+        linters: [staticcheck]
+        text: "SA1019.*elliptic\\.Unmarshal"
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
+  settings:
+    goimports:
+      local-prefixes:
+        - github.com/eclipse-keypont/crypto11
