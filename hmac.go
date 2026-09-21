@@ -54,8 +54,9 @@ type hmacImplementation struct {
 	// PKCS#11 mechanism information
 	mechDescription *pkcs11.Mechanism
 
-	// Cleanup function
-	cleanup func()
+	// Cleanup function. It takes the error the operation ended with, so that
+	// a session the token declared dead is discarded rather than pooled.
+	cleanup func(err error)
 
 	// Count of updates
 	updates uint64
@@ -147,15 +148,15 @@ func (hi *hmacImplementation) initialize() (err error) {
 	// release the session. Returning the same session to the pool twice would hand it
 	// to two concurrent callers (session-state corruption / cross-operation leakage),
 	// so guard on the nil sentinel.
-	hi.cleanup = func() {
+	hi.cleanup = func(err error) {
 		if hi.session == nil {
 			return
 		}
-		hi.key.context.pool.Put(session)
+		hi.key.context.putSession(session, err)
 		hi.session = nil
 	}
 	if err = hi.session.ctx.SignInit(hi.session.handle, hi.mechDescription, hi.key.handle); err != nil {
-		hi.cleanup()
+		hi.cleanup(err)
 		return
 	}
 	hi.updates = 0
@@ -178,7 +179,7 @@ func (hi *hmacImplementation) Write(p []byte) (n int, err error) {
 	if err = hi.session.ctx.SignUpdate(hi.session.handle, p); err != nil {
 		// The operation is dead. Release the session now, because Sum (which normally
 		// performs cleanup) will not be reached.
-		hi.cleanup()
+		hi.cleanup(err)
 		return
 	}
 	hi.updates++
@@ -199,12 +200,12 @@ func (hi *hmacImplementation) Sum(b []byte) []byte {
 			// http://docs.oasis-open.org/pkcs11/pkcs11-base/v2.40/os/pkcs11-base-v2.40-os.html#_Toc322855304
 			// We must ensure that C_SignUpdate is called _at least once_.
 			if err = hi.session.ctx.SignUpdate(hi.session.handle, []byte{}); err != nil {
-				hi.cleanup()
+				hi.cleanup(err)
 				panic(err)
 			}
 		}
 		result, err := hi.session.ctx.SignFinal(hi.session.handle)
-		hi.cleanup()
+		hi.cleanup(err)
 		if err != nil {
 			panic(err)
 		}

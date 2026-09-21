@@ -354,3 +354,17 @@ func TestInvalidPinReleasesPersistentSession(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, ctx2.Close())
 }
+
+func TestModuleCloseReportsRefcountDrift(t *testing.T) {
+	ctx := testContext(t)
+	defer ctx.Close()
+
+	// A moduleCtx that is not what the cache holds under its path: the old
+	// code panicked here, and there is no reason a library should.
+	stray := moduleCtx{Ctx: ctx.ctx.Ctx, path: "/not/the/registered/path.so"}
+	require.ErrorIs(t, stray.Close(), errModuleRefCount)
+
+	// The real reference is untouched by the failed attempt.
+	_, err := ctx.FindKeys(randomBytes(), nil)
+	require.NoError(t, err)
+}

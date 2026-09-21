@@ -180,7 +180,7 @@ func TestPoisonedSessionIsReplaced(t *testing.T) {
 	s, err := ctx.getSession()
 	require.NoError(t, err)
 	require.NoError(t, s.ctx.CloseSession(s.handle))
-	ctx.pool.Put(s)
+	ctx.putSession(s, nil)
 
 	_, err = ctx.FindKeys(randomBytes(), nil)
 	require.Error(t, err, "the dead session must surface an error once")
@@ -192,4 +192,48 @@ func TestPoisonedSessionIsReplaced(t *testing.T) {
 	// with CKR_SESSION_HANDLE_INVALID forever.
 	_, err = ctx.FindKeys(randomBytes(), nil)
 	require.NoError(t, err, "a fresh session must have replaced the dead one")
+}
+
+func TestCloseWaitsForOperationsInFlight(t *testing.T) {
+	// An operation holds a session; Close must not tear the module down
+	// underneath it, and must not return until it has finished.
+	cfg := testConfig(t)
+	cfg.MaxSessions = 3
+	ctx, err := Configure(cfg)
+	require.NoError(t, err)
+
+	s, err := ctx.getSession()
+	require.NoError(t, err)
+
+	closed := make(chan error, 1)
+	go func() { closed <- ctx.Close() }()
+
+	select {
+	case err := <-closed:
+		t.Fatalf("Close returned (%v) while an operation still held a session", err)
+	case <-time.After(200 * time.Millisecond):
+	}
+
+	// New operations are refused rather than admitted behind a pending Close.
+	// (They block until Close completes, then see the closed Context.)
+	refused := make(chan error, 1)
+	go func() {
+		_, err := ctx.FindKeys(randomBytes(), nil)
+		refused <- err
+	}()
+
+	ctx.putSession(s, nil)
+
+	select {
+	case err := <-closed:
+		require.NoError(t, err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("Close did not return after the operation released its session")
+	}
+	select {
+	case err := <-refused:
+		require.Error(t, err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("operation queued behind Close never returned")
+	}
 }

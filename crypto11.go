@@ -172,6 +172,12 @@ type Context struct {
 	// closeOnce makes Close idempotent.
 	closeOnce sync.Once
 
+	// ops is held for reading by every operation for as long as it holds a
+	// session out of the pool — getSession to putSession — and for writing by
+	// Close. Close therefore waits for operations in flight, and no operation
+	// can start between Close deciding to tear down and the teardown.
+	ops sync.RWMutex
+
 	ctx moduleCtx
 	cfg *Config
 
@@ -358,7 +364,7 @@ func openModule(path string) (moduleCtx, error) {
 		return moduleCtx{}, fmt.Errorf("failed to initialize module: %w", err)
 	}
 
-	modCtx := moduleCtx{ctx}
+	modCtx := moduleCtx{Ctx: ctx, path: absPath}
 	moduleReferences[absPath] = moduleRef{
 		ctx:      modCtx,
 		refCount: 1,
@@ -369,43 +375,43 @@ func openModule(path string) (moduleCtx, error) {
 // Context to a specific module. Users of the module all share the same context.
 type moduleCtx struct {
 	*pkcs11.Ctx
+
+	// path is the key under which this module is held in moduleReferences.
+	path string
 }
 
+// errModuleRefCount is returned by Close when the reference count for the
+// module no longer matches the Contexts holding it — a Context closed through
+// something other than Context.Close, or a moduleCtx copied and closed twice.
+var errModuleRefCount = errors.New("PKCS#11 module reference count is inconsistent")
+
 // Close drops reference to its associated module and does cleanup if it is the last reference.
-func (mc moduleCtx) Close() {
+//
+// The refcount is the only thing standing between the shared *pkcs11.Ctx and a
+// use-after-free, so drift is reported rather than acted on: an error, not a
+// panic, and never a Destroy the count does not justify.
+func (mc moduleCtx) Close() error {
 	moduleReferencesMutex.Lock()
 	defer moduleReferencesMutex.Unlock()
 
-	var path string
-	var mod moduleRef
-	for p, ref := range moduleReferences {
-		if ref.ctx == mc {
-			path = p
-			mod = ref
-			break
-		}
-	}
-	if path == "" {
-		// Instance has already been destroyed even though we are holding a reference.
-		panic("referenced module not found")
-	}
-	if mod.refCount < 1 {
-		// Reference count has lost count of the number of actual references.
-		panic("invalid reference count for PKCS#11 library")
+	mod, ok := moduleReferences[mc.path]
+	if !ok || mod.ctx.Ctx != mc.Ctx || mod.refCount < 1 {
+		return errModuleRefCount
 	}
 
 	if mod.refCount == 1 {
 		// Do cleanup as last reference.
 		_ = mc.Finalize()
 		mc.Destroy()
-		delete(moduleReferences, path)
-	} else {
-		// Decrement reference count.
-		moduleReferences[path] = moduleRef{
-			ctx:      mod.ctx,
-			refCount: mod.refCount - 1,
-		}
+		delete(moduleReferences, mc.path)
+		return nil
 	}
+	// Decrement reference count.
+	moduleReferences[mc.path] = moduleRef{
+		ctx:      mod.ctx,
+		refCount: mod.refCount - 1,
+	}
+	return nil
 }
 
 // Configure creates a new Context based on the supplied PKCS#11 configuration.
@@ -479,7 +485,7 @@ func Configure(config *Config) (*Context, error) {
 		if instance.pool != nil {
 			instance.pool.Close()
 		}
-		instance.ctx.Close()
+		_ = instance.ctx.Close()
 	}()
 
 	slots, err := instance.ctx.GetSlotList(true)
@@ -627,20 +633,26 @@ func (c *Context) Close() error {
 	// sync.Once guarantees the teardown runs exactly once even if Close is
 	// called concurrently or repeatedly. Running it twice would double-close the
 	// pool and trip moduleCtx.Close's refcount panic.
+	var err error
 	c.closeOnce.Do(func() {
+		// Wait for every operation that holds a session, and keep new ones out.
+		c.ops.Lock()
+		defer c.ops.Unlock()
+
 		c.closed.Set(true)
 
-		// Block until all resources returned to pool
+		// Nothing is checked out any more, so this returns at once.
 		c.pool.Close()
 
 		// Close our long-term session. We ignore any returned error,
 		// since we plan to kill our collection to the library anyway.
 		_ = c.ctx.CloseSession(c.persistentSession)
+		c.persistentSession = 0
 
 		// Drop reference to the held context. May destroy the module instance
 		// if this is the last reference to it.
-		c.ctx.Close()
+		err = c.ctx.Close()
 	})
 
-	return nil
+	return err
 }
