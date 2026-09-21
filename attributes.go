@@ -251,12 +251,35 @@ func (a AttributeSet) Unset(attributeType AttributeType) {
 	delete(a, attributeType)
 }
 
+// String renders the set for logs and error messages. The values of
+// attributes that can carry key material are replaced by their length: a set
+// built to import a key, or read back with GetAttributes, may hold a secret
+// key's CKA_VALUE or an RSA private key's CRT components, and %v on it should
+// not put those in a log line.
 func (a AttributeSet) String() string {
 	result := new(strings.Builder)
 	for attr, value := range a {
+		if sensitiveAttribute(attr) {
+			_, _ = fmt.Fprintf(result, "%s: <redacted, %d bytes>\n", attributeTypeString(attr), len(value.Value))
+			continue
+		}
 		_, _ = fmt.Fprintf(result, "%s: %x\n", attributeTypeString(attr), value.Value)
 	}
 	return result.String()
+}
+
+// sensitiveAttribute reports whether an attribute's value may be key material.
+// CKA_VALUE is the value of a secret key and of a DSA, EC or ML-KEM private
+// key (it is also the DER of a certificate and the Y of a DSA public key, but
+// String cannot tell the object class, so it errs on the side of redaction);
+// the six others are the RSA private key's components. Vendor-defined
+// attributes are redacted as well, since nothing here knows what they hold.
+func sensitiveAttribute(attr AttributeType) bool {
+	switch attr {
+	case CkaValue, CkaPrivateExponent, CkaPrime1, CkaPrime2, CkaExponent1, CkaExponent2, CkaCoefficient:
+		return true
+	}
+	return attr >= pkcs11.CKA_VENDOR_DEFINED
 }
 
 // NewAttributeSetWithID is a helper function that populates a new slice of Attributes with the provided ID.
