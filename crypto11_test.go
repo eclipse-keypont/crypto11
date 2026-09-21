@@ -5,9 +5,13 @@
 package crypto11
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math/rand"
+	"os"
+	"path/filepath"
+	"runtime"
 	"testing"
 
 	pkcs11 "github.com/eclipse-keypont/pkcs11-go/cryptoki"
@@ -367,4 +371,76 @@ func TestModuleCloseReportsRefcountDrift(t *testing.T) {
 	// The real reference is untouched by the failed attempt.
 	_, err := ctx.FindKeys(randomBytes(), nil)
 	require.NoError(t, err)
+}
+
+func TestPinFuncSuppliesAndWipesThePin(t *testing.T) {
+	cfg := testConfig(t)
+	realPin := cfg.Pin
+	cfg.Pin = ""
+
+	var handed []byte
+	calls := 0
+	cfg.PinFunc = func() ([]byte, error) {
+		calls++
+		handed = []byte(realPin)
+		return handed, nil
+	}
+
+	ctx, err := Configure(cfg)
+	require.NoError(t, err)
+	defer ctx.Close()
+
+	assert.Equal(t, 1, calls)
+	assert.Equal(t, make([]byte, len(realPin)), handed, "the slice PinFunc returned must have been wiped")
+	assert.Nil(t, ctx.cfg.PinFunc, "the function must not be retained")
+	assert.NotNil(t, cfg.PinFunc, "the caller's Config is untouched")
+
+	_, err = ctx.FindKeys(randomBytes(), nil)
+	require.NoError(t, err, "the login worked")
+}
+
+func TestPinFuncErrorFailsConfigure(t *testing.T) {
+	cfg := testConfig(t)
+	cfg.Pin = ""
+	boom := errors.New("secret store unavailable")
+	cfg.PinFunc = func() ([]byte, error) { return nil, boom }
+
+	_, err := Configure(cfg)
+	require.ErrorIs(t, err, boom)
+
+	// And nothing was left half-open: the token is configurable afterwards.
+	ctx := testContext(t)
+	require.NoError(t, ctx.Close())
+}
+
+func TestConfigureFromFileRefusesSharedPinFile(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("file modes are not checked on Windows")
+	}
+	cfg := testConfig(t)
+	require.NotEmpty(t, cfg.Pin, "this test needs a PIN in the test configuration")
+	data, err := json.Marshal(cfg)
+	require.NoError(t, err)
+
+	path := filepath.Join(t.TempDir(), "crypto11.config.json")
+	require.NoError(t, os.WriteFile(path, data, 0o644))
+
+	_, err = ConfigureFromFile(path)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "readable by other users")
+
+	require.NoError(t, os.Chmod(path, 0o600))
+	ctx, err := ConfigureFromFile(path)
+	require.NoError(t, err)
+	require.NoError(t, ctx.Close())
+
+	// A file without a PIN in it is not a credential and is not policed.
+	cfg.Pin = ""
+	cfg.LoginNotSupported = true
+	data, err = json.Marshal(cfg)
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(path, data, 0o644))
+	ctx, err = ConfigureFromFile(path)
+	require.NoError(t, err)
+	require.NoError(t, ctx.Close())
 }

@@ -7,10 +7,10 @@ package crypto11
 import (
 	"crypto"
 	"crypto/x509"
+	"errors"
 	"fmt"
 
 	pkcs11 "github.com/eclipse-keypont/pkcs11-go/cryptoki"
-	"github.com/pkg/errors"
 )
 
 const maxHandlePerFind = 20
@@ -349,7 +349,7 @@ func (c *Context) FindKeyPairsWithAttributes(attributes AttributeSet) (signer []
 	var keys []Signer
 
 	if _, ok := attributes[CkaClass]; ok {
-		return nil, errors.Errorf("keypair attribute set must not contain CkaClass")
+		return nil, errors.New("keypair attribute set must not contain CkaClass")
 	}
 
 	err = c.withSession(func(session *pkcs11Session) error {
@@ -492,7 +492,7 @@ func (c *Context) FindKeysWithAttributes(attributes AttributeSet) ([]*SecretKey,
 	var keys []*SecretKey
 
 	if _, ok := attributes[CkaClass]; ok {
-		return nil, errors.Errorf("key attribute set must not contain CkaClass")
+		return nil, errors.New("key attribute set must not contain CkaClass")
 	}
 
 	err := c.withSession(func(session *pkcs11Session) error {
@@ -659,7 +659,7 @@ func (c *Context) FindPrivateKeysWithAttributes(attributes AttributeSet) (signer
 	var keys []PrivateKey
 
 	if _, ok := attributes[CkaClass]; ok {
-		return nil, errors.Errorf("keypair attribute set must not contain CkaClass")
+		return nil, errors.New("keypair attribute set must not contain CkaClass")
 	}
 
 	err = c.withSession(func(session *pkcs11Session) error {
@@ -745,7 +745,7 @@ func (c *Context) GetAttributes(key interface{}, attributes []AttributeType) (a 
 	case *SecretKey:
 		handle, owner = k.handle, k.context
 	default:
-		return nil, errors.Errorf("not a PKCS#11 key")
+		return nil, errors.New("not a PKCS#11 key")
 	}
 	if owner != c {
 		return nil, errForeignKey
@@ -792,7 +792,7 @@ func (c *Context) GetPubAttributes(key interface{}, attributes []AttributeType) 
 	case *pkcs11MLKEMKeyPair:
 		handle, owner = k.pubKeyHandle, k.context
 	default:
-		return nil, errors.Errorf("not an asymmetric PKCS#11 key")
+		return nil, errors.New("not an asymmetric PKCS#11 key")
 	}
 	if owner != c {
 		return nil, errForeignKey

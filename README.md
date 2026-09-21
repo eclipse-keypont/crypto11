@@ -136,6 +136,20 @@ A minimal configuration file looks like this:
 - `Pin` is the password for the `CKU_USER` user.
 - `UseGCMIVFromHSM` generates the IV for GCM mechanism from the HSM
 
+A configuration file that contains a `Pin` is a credential: `ConfigureFromFile` refuses one that
+is readable by anyone but its owner (`chmod 600`; not checked on Windows). Better still, keep the
+PIN out of the file and out of any Go `string` — which cannot be wiped — by configuring
+programmatically with `Config.PinFunc`, a callback called once from `Configure` whose returned
+bytes are wiped as soon as the token has been logged into:
+
+```go
+ctx, err := crypto11.Configure(&crypto11.Config{
+	Path:       "/usr/lib/softhsm/libsofthsm2.so",
+	TokenLabel: "token1",
+	PinFunc:    func() ([]byte, error) { return secretStore.Read("hsm-pin") },
+})
+```
+
 # Build
 
 This package is using CGo for cryptographic packages.  

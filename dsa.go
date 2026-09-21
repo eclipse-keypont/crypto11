@@ -7,10 +7,10 @@ package crypto11
 import (
 	"crypto"
 	"crypto/dsa"
+	"errors"
+	"fmt"
 	"io"
 	"math/big"
-
-	"github.com/pkg/errors"
 
 	pkcs11 "github.com/eclipse-keypont/pkcs11-go/cryptoki"
 )
@@ -72,7 +72,7 @@ func validateDSAPublicKey(pub *dsa.PublicKey) error {
 		return errors.New("DSA public key from token has a zero or negative component")
 	}
 	if p.BitLen() > maxDSAPrimeBits {
-		return errors.Errorf("DSA prime from token is %d bits; refusing more than %d", p.BitLen(), maxDSAPrimeBits)
+		return fmt.Errorf("DSA prime from token is %d bits; refusing more than %d", p.BitLen(), maxDSAPrimeBits)
 	}
 	if q.Cmp(p) >= 0 {
 		return errors.New("DSA subprime from token is not smaller than the prime")
@@ -100,7 +100,7 @@ func validateDSAPublicKey(pub *dsa.PublicKey) error {
 
 func notNilBytes(obj []byte, name string) error {
 	if obj == nil {
-		return errors.Errorf("%s cannot be nil", name)
+		return fmt.Errorf("%s cannot be nil", name)
 	}
 	return nil
 }

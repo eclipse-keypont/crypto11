@@ -5,10 +5,10 @@
 package crypto11
 
 import (
+	"errors"
 	"fmt"
 
 	pkcs11 "github.com/eclipse-keypont/pkcs11-go/cryptoki"
-	"github.com/pkg/errors"
 )
 
 // MLKEMParameterSet identifies an ML-KEM security level as defined in FIPS 203.
@@ -108,8 +108,10 @@ func (k *pkcs11MLKEMKeyPair) Delete() error {
 		return err
 	}
 	err := k.context.withSession(func(session *pkcs11Session) error {
-		err := session.ctx.DestroyObject(session.handle, k.pubKeyHandle)
-		return errors.WithMessage(err, "failed to destroy ML-KEM public key")
+		if err := session.ctx.DestroyObject(session.handle, k.pubKeyHandle); err != nil {
+			return fmt.Errorf("failed to destroy ML-KEM public key: %w", err)
+		}
+		return nil
 	})
 	if err == nil {
 		k.pubKeyHandle = pkcs11.CK_INVALID_HANDLE

@@ -6,10 +6,11 @@ package crypto11
 
 import (
 	"encoding/asn1"
+	"errors"
+	"fmt"
 	"math/big"
 
 	pkcs11 "github.com/eclipse-keypont/pkcs11-go/cryptoki"
-	"github.com/pkg/errors"
 )
 
 // CK_ULONG conversions live in the pkcs11-go binding, as pkcs11.ULongToBytes
@@ -38,7 +39,7 @@ func (sig *dsaSignature) unmarshalBytes(sigBytes []byte) error {
 // Populate a dsaSignature from DER encoding
 func (sig *dsaSignature) unmarshalDER(sigDER []byte) error {
 	if rest, err := asn1.Unmarshal(sigDER, sig); err != nil {
-		return errors.WithMessage(err, "DSA signature contains invalid ASN.1 data")
+		return fmt.Errorf("DSA signature contains invalid ASN.1 data: %w", err)
 	} else if len(rest) > 0 {
 		return errors.New("unexpected data found after DSA signature")
 	}

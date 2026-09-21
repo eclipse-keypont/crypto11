@@ -6,7 +6,6 @@ toolchain go1.27.1
 
 require (
 	github.com/eclipse-keypont/pkcs11-go v1.1.1
-	github.com/pkg/errors v0.9.1
 	github.com/stretchr/testify v1.12.1
 )
 
