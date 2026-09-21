@@ -195,6 +195,16 @@ func (c *Context) GenerateMLKEMKeyPairWithAttributes(public, private AttributeSe
 	if !validMLKEMParameterSet(paramSet) {
 		return nil, fmt.Errorf("invalid ML-KEM parameter set %#x (expected MLKEM512, MLKEM768 or MLKEM1024)", paramSet)
 	}
+	// AddIfNotPresent below leaves a CKA_PARAMETER_SET already in a template
+	// alone, so the token would generate at that level while the returned key
+	// pair reported paramSet. There is one effective level; both inputs have
+	// to agree on it.
+	for _, template := range []AttributeSet{public, private} {
+		if attr, ok := template[CkaParameterSet]; ok && pkcs11.BytesToULong(attr.Value) != paramSet {
+			return nil, fmt.Errorf("template CKA_PARAMETER_SET %#x conflicts with requested parameter set %#x",
+				pkcs11.BytesToULong(attr.Value), paramSet)
+		}
+	}
 	var k MLKEMKeyPair
 	err := c.withSession(func(session *pkcs11Session) error {
 		public.AddIfNotPresent([]*pkcs11.Attribute{

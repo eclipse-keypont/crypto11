@@ -146,7 +146,7 @@ func (c *Context) GenerateRSAKeyPairWithAttributes(public, private AttributeSet,
 
 		pub, err := exportRSAPublicKey(session, pubHandle)
 		if err != nil {
-			return err
+			return destroyKeyPair(session, pubHandle, privHandle, err)
 		}
 		k = &pkcs11PrivateKeyRSA{
 			pkcs11PrivateKey: pkcs11PrivateKey{
