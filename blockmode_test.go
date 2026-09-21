@@ -91,3 +91,42 @@ func testCBCMode(t *testing.T, key *SecretKey, iv []byte) {
 	require.Contains(t, string(pLong), string(long), "plaintext contains original text")
 
 }
+
+func TestBlockModeFinalizerNeverPanics(t *testing.T) {
+	// Build block modes on a session that was closed behind the pool's back,
+	// so C_DecryptFinal fails with CKR_SESSION_HANDLE_INVALID — the kind of
+	// token error the finalizer used to turn into an unrecoverable panic.
+	cfg := testConfig(t)
+	cfg.MaxSessions = 3
+	ctx, err := Configure(cfg)
+	require.NoError(t, err)
+	defer ctx.Close()
+
+	deadBlockMode := func() *blockModeCloser {
+		s, err := ctx.getSession()
+		require.NoError(t, err)
+		require.NoError(t, s.ctx.CloseSession(s.handle))
+		return &blockModeCloser{
+			session:   s,
+			blockSize: 16,
+			mode:      modeDecrypt,
+			// The dead session is not reusable; ask the pool for a fresh one.
+			cleanup: func() { ctx.pool.Put(nil) },
+		}
+	}
+
+	// From the runtime finalizer: the error is dropped, nothing panics.
+	bmc := deadBlockMode()
+	require.NotPanics(t, func() { finalizeBlockModeCloser(bmc) })
+	require.Nil(t, bmc.session, "the session must have been released regardless")
+	require.NotPanics(t, func() { finalizeBlockModeCloser(bmc) }, "and a second run is a no-op")
+
+	// From an explicit Close the caller still gets the panic they always did.
+	bmc = deadBlockMode()
+	require.Panics(t, func() { bmc.Close() })
+	require.Nil(t, bmc.session)
+
+	// The pool recovered from both.
+	_, err = ctx.FindKeys(randomBytes(), nil)
+	require.NoError(t, err)
+}

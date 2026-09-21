@@ -6,6 +6,7 @@ package crypto11
 
 import (
 	"crypto/cipher"
+	"errors"
 	"runtime"
 
 	pkcs11 "github.com/eclipse-keypont/pkcs11-go/cryptoki"
@@ -123,8 +124,13 @@ func (key *SecretKey) newBlockModeCloser(mech uint, mode int, iv []byte, setFina
 	return bmc, nil
 }
 
+// finalizeBlockModeCloser is the runtime finalizer for block modes created
+// without a Closer. It must never panic: a panic on the finalizer goroutine
+// cannot be recovered by the application, so a token that fails C_*Final on an
+// abandoned block mode would otherwise take the whole process down. The error
+// has no one to go to and is dropped; the session is still released.
 func finalizeBlockModeCloser(obj interface{}) {
-	obj.(*blockModeCloser).Close()
+	_ = obj.(*blockModeCloser).close()
 }
 
 func (bmc *blockModeCloser) BlockSize() int {
@@ -149,6 +155,10 @@ func (bmc *blockModeCloser) CryptBlocks(dst, src []byte) {
 	if err != nil {
 		panic(err)
 	}
+	// The binding's buffer is a second copy of the output — plaintext, in
+	// decrypt mode — that the caller cannot reach to clear. Wipe it once it
+	// has been copied out, on the panic paths too.
+	defer pkcs11.Wipe(result)
 	// PKCS#11 2.40 s5.2 says that the operation must produce as much output
 	// as possible, so we should never have less than we submitted for CBC.
 	// This could be different for other modes but we don't implement any yet.
@@ -159,9 +169,20 @@ func (bmc *blockModeCloser) CryptBlocks(dst, src []byte) {
 	runtime.KeepAlive(bmc)
 }
 
+// Close finalizes the operation and releases the session. A token error, or
+// output where CBC can have none, is a panic: cipher.BlockMode has no way to
+// return an error, and silently dropping either would hide a broken operation.
 func (bmc *blockModeCloser) Close() {
+	if err := bmc.close(); err != nil {
+		panic(err)
+	}
+}
+
+// close is the error-returning teardown shared by Close and the runtime
+// finalizer. It is idempotent.
+func (bmc *blockModeCloser) close() error {
 	if bmc.session == nil {
-		return
+		return nil
 	}
 	var result []byte
 	var err error
@@ -174,12 +195,14 @@ func (bmc *blockModeCloser) Close() {
 	bmc.session = nil
 	bmc.cleanup()
 	if err != nil {
-		panic(err)
+		return err
 	}
 	// PKCS#11 2.40 s5.2 says that the operation must produce as much output
 	// as possible, so we should never have any left over for CBC.
 	// This could be different for other modes but we don't implement any yet.
 	if len(result) > 0 {
-		panic("nontrivial result from *Final operation")
+		pkcs11.Wipe(result)
+		return errors.New("nontrivial result from *Final operation")
 	}
+	return nil
 }
