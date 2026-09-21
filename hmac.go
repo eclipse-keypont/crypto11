@@ -6,6 +6,7 @@ package crypto11
 
 import (
 	"errors"
+	"fmt"
 	"hash"
 
 	pkcs11 "github.com/eclipse-keypont/pkcs11-go/cryptoki"
@@ -70,8 +71,8 @@ type hmacInfo struct {
 }
 
 var hmacInfos = map[int]*hmacInfo{
-	pkcs11.CKM_MD5_HMAC:                {20, 64, false},
-	pkcs11.CKM_MD5_HMAC_GENERAL:        {20, 64, true},
+	pkcs11.CKM_MD5_HMAC:                {16, 64, false},
+	pkcs11.CKM_MD5_HMAC_GENERAL:        {16, 64, true},
 	pkcs11.CKM_SHA_1_HMAC:              {20, 64, false},
 	pkcs11.CKM_SHA_1_HMAC_GENERAL:      {20, 64, true},
 	pkcs11.CKM_SHA224_HMAC:             {28, 64, false},
@@ -101,7 +102,9 @@ var errHmacClosed = errors.New("already called Sum()")
 // Size() function will return whatever length was, even if it is wrong.
 // BlockSize() will always return 0 in this case.
 //
-// The Reset() method is not implemented.
+// Reset finishes any operation in progress and starts a new one on a fresh
+// session; if that session cannot be obtained the hash is dead — Write returns
+// an error and Sum panics — rather than replaying the previous result.
 // After Sum() is called no new data may be added.
 //
 // Failure handling: the returned hash.Hash cannot report errors through Sum,
@@ -200,17 +203,48 @@ func (hi *hmacImplementation) Sum(b []byte) []byte {
 				panic(err)
 			}
 		}
-		hi.result, err = hi.session.ctx.SignFinal(hi.session.handle)
+		result, err := hi.session.ctx.SignFinal(hi.session.handle)
 		hi.cleanup()
 		if err != nil {
 			panic(err)
 		}
+		// Only a MAC of the size the mechanism promises is cached. A token that
+		// answers with an empty or truncated tag — through a defect, or because
+		// it was tampered with — would otherwise hand the caller something a
+		// verifier could be made to accept.
+		if err := checkMACLength(result, hi.size); err != nil {
+			panic(err)
+		}
+		hi.result = result
 	}
 	return append(b, hi.result...)
 }
 
+// checkMACLength rejects a token-returned MAC that is empty or, when the
+// expected size is known, of any other length. size is zero only for a
+// mechanism outside hmacInfos used with length 0, in which case there is
+// nothing to compare against beyond emptiness.
+func checkMACLength(result []byte, size int) error {
+	if len(result) == 0 || (size > 0 && len(result) != size) {
+		return fmt.Errorf("token returned a %d-byte MAC where %d bytes were expected", len(result), size)
+	}
+	return nil
+}
+
+// Reset finishes any operation in progress and starts a new one.
 func (hi *hmacImplementation) Reset() {
-	hi.Sum(nil) // Clean up
+	if hi.session != nil {
+		// A multi-part operation is still open on the session: finalize it so
+		// the session goes back to the pool without a dangling C_SignInit.
+		hi.Sum(nil)
+	}
+
+	// Forget the previous MAC before trying to reinitialize. Should the new
+	// session be unobtainable, a stale result here would make the next Sum
+	// return the previous message's tag as if it authenticated the new input.
+	// With result and session both nil the hash is dead: Write errors, Sum
+	// panics, which is what a token failure mid-operation already produces.
+	hi.result = nil
 
 	// Assign the error to "_" to indicate we are knowingly ignoring this. It may have been
 	// sensible to panic at this stage, but we cannot add a panic without breaking backwards
