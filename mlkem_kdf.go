@@ -7,6 +7,7 @@ package crypto11
 import (
 	"crypto/sha3"
 	"fmt"
+	"runtime"
 )
 
 // mlkemCekSize is the AES key size, in bytes, MLKEMDeriveKey produces for each ML-KEM
@@ -67,8 +68,29 @@ func appendBE32(b []byte, v uint32) []byte {
 // Built on top of cSHAKE128 from the Go standard library (crypto/sha3, Go 1.24+).
 func kmac128(key, data []byte, outputLen int) []byte {
 	// KMAC128(K, X, L, S) = cSHAKE128(bytepad(encode_string(K), 168) || X || right_encode(L*8), L, "KMAC", S="")
-	h := sha3.NewCSHAKE128([]byte("KMAC"), nil)
-	_, _ = h.Write(bytepad(encodeString(key), 168))    // never returns an error
+	return kmac(sha3.NewCSHAKE128([]byte("KMAC"), nil), 168, key, data, outputLen)
+}
+
+// kmac256 computes KMAC256(K=key, X=data, L=outputLen bytes, S="") per NIST SP 800-185.
+// Built on top of cSHAKE256 from the Go standard library (crypto/sha3, Go 1.24+).
+func kmac256(key, data []byte, outputLen int) []byte {
+	// KMAC256(K, X, L, S) = cSHAKE256(bytepad(encode_string(K), 136) || X || right_encode(L*8), L, "KMAC", S="")
+	return kmac(sha3.NewCSHAKE256([]byte("KMAC"), nil), 136, key, data, outputLen)
+}
+
+// kmac runs the KMAC construction over an already customized cSHAKE instance
+// whose rate is rate bytes.
+//
+// The key is the ML-KEM shared secret. The caller can wipe the slice it owns,
+// but not the copies the encoding makes on the way into the sponge, so those
+// are kept to one — absorbKey builds bytepad(encode_string(K), rate) in a
+// single buffer sized up front — and that one is zeroed as soon as it has been
+// absorbed. The sponge state is reset after the output is squeezed for the
+// same reason. Go cannot promise the garbage collector never moved any of
+// these (see pkcs11.Wipe); this narrows the window, it does not close it.
+func kmac(h *sha3.SHAKE, rate int, key, data []byte, outputLen int) []byte {
+	defer h.Reset()
+	absorbKey(h, key, rate)
 	_, _ = h.Write(data)                               // never returns an error
 	_, _ = h.Write(rightEncode(uint64(outputLen * 8))) // never returns an error
 	out := make([]byte, outputLen)
@@ -76,17 +98,21 @@ func kmac128(key, data []byte, outputLen int) []byte {
 	return out
 }
 
-// kmac256 computes KMAC256(K=key, X=data, L=outputLen bytes, S="") per NIST SP 800-185.
-// Built on top of cSHAKE256 from the Go standard library (crypto/sha3, Go 1.24+).
-func kmac256(key, data []byte, outputLen int) []byte {
-	// KMAC256(K, X, L, S) = cSHAKE256(bytepad(encode_string(K), 136) || X || right_encode(L*8), L, "KMAC", S="")
-	h := sha3.NewCSHAKE256([]byte("KMAC"), nil)
-	_, _ = h.Write(bytepad(encodeString(key), 136))    // never returns an error
-	_, _ = h.Write(data)                               // never returns an error
-	_, _ = h.Write(rightEncode(uint64(outputLen * 8))) // never returns an error
-	out := make([]byte, outputLen)
-	_, _ = h.Read(out) // XOF Read never returns an error
-	return out
+// absorbKey writes bytepad(encode_string(key), rate) to h, building the
+// encoding in one buffer that is wiped afterwards. It is the secret-aware
+// equivalent of bytepad(encodeString(key), rate), which allocates and abandons
+// an intermediate copy of the key at each step.
+func absorbKey(h *sha3.SHAKE, key []byte, rate int) {
+	prefix := leftEncode(uint64(rate))         // bytepad's left_encode(w)
+	lenEnc := leftEncode(uint64(len(key)) * 8) // encode_string's left_encode(len(S)*8)
+	n := len(prefix) + len(lenEnc) + len(key)
+	buf := make([]byte, n+(rate-n%rate)%rate) // zero-padded to a whole number of blocks
+	i := copy(buf, prefix)
+	i += copy(buf[i:], lenEnc)
+	copy(buf[i:], key)
+	_, _ = h.Write(buf) // never returns an error
+	clear(buf)
+	runtime.KeepAlive(buf)
 }
 
 // --- NIST SP 800-185 encoding primitives ---
