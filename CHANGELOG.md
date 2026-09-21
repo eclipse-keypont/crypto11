@@ -10,6 +10,19 @@ was replaced, the config file was renamed, and the API surface was hardened afte
 
 ### Breaking changes
 
+- `ConfigureFromFile` refuses a configuration file that contains a `Pin` and is readable by its
+  group or by others (mode `& 0077 != 0`; not checked on Windows). A `chmod 600` on the file, or
+  moving the PIN out of it (`Config.PinFunc`, an environment variable), is the fix.
+- Generated private and secret keys default to `CKA_PRIVATE=true`. A template that sets
+  `CKA_PRIVATE` explicitly is honoured; a Context with `LoginNotSupported` keeps the token's
+  default.
+- `GetAttributes`, `GetAttribute`, `GetPubAttributes` and `GetPubAttribute` return `errForeignKey`
+  for a key obtained through a different Context.
+- `Signer.Sign` with PKCS#1 v1.5 rejects a `crypto.Hash` it has no DigestInfo prefix for, and a
+  digest whose length is not `hash.Size()`; `crypto.Hash(0)` still signs the input bare.
+- `Config.UserType` must be `DefaultUserType` (`CKU_USER`) or `CryptoUser`; any other value is
+  rejected by `Configure`.
+- `github.com/pkg/errors` is no longer a dependency. Error strings are unchanged.
 - **PKCS#11 binding replaced**: `miekg/pkcs11` is out, [`eclipse-keypont/pkcs11-go`](https://pkg.go.dev/github.com/eclipse-keypont/pkcs11-go)
   is in. This changes the concrete type behind the public `Attribute` alias.
 - Module path is now `github.com/eclipse-keypont/crypto11/v2`.
@@ -32,6 +45,9 @@ was replaced, the config file was renamed, and the API surface was hardened afte
   (`mlkem.go`).
 - `MLKEMDeriveKey`, a KMAC-based key derivation helper for turning ML-KEM shared secrets into
   usable keys.
+- `Config.PinFunc`, a callback that supplies the PIN as bytes to `Configure`, which wipes them as
+  soon as the token has been logged into. For callers who would rather never hold the PIN in a
+  Go `string`, which cannot be wiped.
 - `Context.PoolStats`, returning session pool counters — capacity, available, active, in use,
   wait count and wait time — for metrics and diagnostics
   ([#119](https://github.com/eclipse-keypont/crypto11/issues/119), requested by
@@ -92,6 +108,55 @@ A dedicated audit found and fixed 7 issues:
 - **Low**: missing bounds checks and unknown-`paramSet` validation in the new ML-KEM code.
 - Ported an upstream fix (ThalesGroup PR #135): HMAC sessions were leaked on mid-operation error
   paths and could be returned to the pool twice; key-gen fallback broadened for SoftHSM/Utimaco.
+
+A second round, cross-checking that audit against an automated one (Synapse) and verifying every
+finding against the code, fixed 27 more. By theme:
+
+- **Token output is validated.** The DSA public key a token returns must have prime `p`/`q`,
+  `q | p-1` and `g`, `y` of order `q` — Go's `dsa.Verify` accepts `(1, 1)` as a signature over
+  anything under a `G = Y = 1` key. A generated ECDSA key must be on the curve that was asked
+  for, a generated DSA key under the parameters that were asked for, an ML-KEM key pair's
+  reported parameter set must be the one in the template. A MAC from `C_SignFinal` must be the
+  size its mechanism produces (the MD5 size in the table was wrong, 20 for 16). An ML-KEM shared
+  secret that comes back empty is an error, not an empty secret.
+- **Keys are what they say they are.** A label-only private key with no matching public object
+  was paired with the first public key of the right type on the token, giving a `Signer` whose
+  `Public()` it could not sign for; the certificate fallback matched every certificate without a
+  `CKA_ID` the same way. `GetAttributes`/`GetPubAttributes` resolved a key's handle against
+  whichever Context they were called on; a key from another Context is now `errForeignKey`.
+  `signPKCS1v15` refuses a hash it has no DigestInfo for (it used to sign the bare digest under
+  that name) and a digest of the wrong size; `decryptOAEP` honours `OAEPOptions.MGFHash`
+  instead of deriving MGF1 from `Hash`; PKCS#1 v1.5 decryption failures are reported as
+  `rsa.ErrDecryption` rather than the token's padding verdict, and `Decrypt` documents the
+  oracle a caller of v1.5 takes on.
+- **Secure-by-default templates.** Generated private and secret keys carry `CKA_PRIVATE=true`
+  unless the caller's template says otherwise (or the Context is `LoginNotSupported`);
+  `CKA_SENSITIVE`/`CKA_EXTRACTABLE` protect a key's value, not its use. A key pair whose
+  generation fails after `C_GenerateKeyPair` — a public key that cannot be exported, a curve
+  mismatch — is destroyed rather than left on the token; an unexportable curve is refused before
+  anything is created.
+- **Lifecycle.** A token advertising one read/write session made `Configure` panic (the pool
+  constructor rejects a zero capacity); it is an error now. A failed `C_Login` leaked the
+  persistent session whenever another Context shared the module. `UserType` values other than
+  `CKU_USER` and `CryptoUser` were silently logged in as `CryptoUser`; they are rejected.
+  Sessions the token declares dead (`CKR_SESSION_HANDLE_INVALID`, `CKR_DEVICE_ERROR`, a stuck
+  `CKR_OPERATION_ACTIVE`, ...) are closed and replaced instead of returned to the pool.
+  `Context.Close` now takes a write lock that every operation holds for reading while it has a
+  session, so the closed check and the session grab are one step, and `Close` waits for
+  operations in flight; `moduleCtx` refcount drift is an error from `Close` rather than a panic.
+- **Panics that could not be caught.** `hash.Hash.Reset` on an HMAC whose reinitialization
+  failed returned the previous message's MAC from the next `Sum`; the hash is now dead instead.
+  The runtime finalizer on a CBC block mode created without a Closer called `Close`, which
+  panics on a token error — on the finalizer goroutine, where nothing can recover it. The
+  issuer walk in `FindCertificateChain`/`FindAllPairedCertificates` is bounded (16) and scans the
+  token at most once per chain, where a chain of _N_ certificates could cost _N_ full scans.
+- **Secret lifetime.** The KMAC key encoding in `MLKEMDeriveKey` no longer leaves append-time
+  copies of the shared secret for the garbage collector; `MLKEMSharedSecret.Bytes` wipes the
+  binding's copy after handing the caller its own; CBC decryption wipes the binding's plaintext
+  buffer; `AttributeSet.String` redacts `CKA_VALUE`, the RSA private components and
+  vendor-defined attributes. `Config.PinFunc` supplies the PIN as bytes that are wiped right after
+  login, for callers who would rather never hold it in a `string`; `ConfigureFromFile` refuses a
+  file that holds a `Pin` and is readable by anyone but its owner.
 
 `SECURITY.md` documents how to report a vulnerability privately — GitHub private vulnerability
 reporting or the Eclipse Foundation security team — and which versions receive fixes.
