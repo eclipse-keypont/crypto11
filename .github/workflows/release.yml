@@ -49,10 +49,16 @@ jobs:
       contents: read
     uses: ./.github/workflows/govulncheck.yml
 
+  gosec:
+    name: Security gate
+    permissions:
+      contents: read
+    uses: ./.github/workflows/gosec.yml
+
   # -- 1. Build, checksum, sign, and publish the source archive --------------
   build:
     name: Build & sign source archive + SBOM
-    needs: [lint, govulncheck]
+    needs: [lint, govulncheck, gosec]
     runs-on: ubuntu-latest
     permissions:
       contents: write  # create the GitHub Release and upload assets

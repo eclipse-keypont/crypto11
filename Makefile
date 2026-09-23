@@ -2,7 +2,7 @@
 # SPDX-FileCopyrightText: 2026 The Eclipse Foundation KeyPont project maintainers
 # SPDX-License-Identifier: MIT
 
-.PHONY: build vet test fuzz lint lint-fix govulncheck notices sbom version release
+.PHONY: build vet test fuzz lint lint-fix govulncheck gosec notices sbom version release
 
 # ── Tool preconditions ───────────────────────────────────────────────────────
 # $(call require,<binary>,<how to install it>) — fail early with an install hint.
@@ -95,6 +95,23 @@ GOVULNCHECK ?= govulncheck
 govulncheck:
 	$(call require,$(GOVULNCHECK),go install golang.org/x/vuln/cmd/govulncheck@latest)
 	$(GOVULNCHECK) -show verbose ./...
+
+# ── Security scan ────────────────────────────────────────────────────────────
+# Runs gosec (Go security checker) — the same check as the CI gosec workflow
+# (.github/workflows/gosec.yml). gosec statically inspects the source for
+# common security issues (hardcoded credentials, weak crypto, unsafe pointer
+# arithmetic, ...).
+#
+# G115 (integer overflow on conversion) is excluded to match .golangci.yml:
+# it is extremely noisy against the PKCS#11 C-style API (CK_ULONG <-> int).
+#
+# Install gosec (same version as CI):
+#   go install github.com/securego/gosec/v2/cmd/gosec@v2.29.0
+GOSEC ?= gosec
+
+gosec:
+	$(call require,$(GOSEC),go install github.com/securego/gosec/v2/cmd/gosec@v2.29.0)
+	$(GOSEC) -exclude=G115 ./...
 
 # ── Licenses ─────────────────────────────────────────────────────────────────
 # Regenerates NOTICES.md from the module graph, rendering go-licenses.tpl.
