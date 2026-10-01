@@ -64,6 +64,15 @@ func TestErrorAfterClosed(t *testing.T) {
 	_, err = ctx.GenerateECDSAKeyPairWithLabel(bytes, bytes, elliptic.P224())
 	assert.Equal(t, errClosed, err)
 
+	_, err = ctx.GenerateEd25519KeyPair(bytes)
+	assert.Equal(t, errClosed, err)
+
+	_, err = ctx.GenerateEd25519KeyPairWithLabel(bytes, bytes)
+	assert.Equal(t, errClosed, err)
+
+	_, err = ctx.GenerateEd25519KeyPairWithAttributes(NewAttributeSet(), NewAttributeSet())
+	assert.Equal(t, errClosed, err)
+
 	_, err = ctx.NewRandomReader()
 	assert.Equal(t, errClosed, err)
 

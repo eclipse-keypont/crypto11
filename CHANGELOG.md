@@ -45,6 +45,20 @@ was replaced, the config file was renamed, and the API surface was hardened afte
   (`mlkem.go`).
 - `MLKEMDeriveKey`, a KMAC-based key derivation helper for turning ML-KEM shared secrets into
   usable keys.
+- **Ed25519** key generation and signing (`GenerateEd25519KeyPair`, `…WithLabel`,
+  `…WithAttributes`), over PKCS#11 v3.0's `CKM_EC_EDWARDS_KEY_PAIR_GEN` and `CKM_EDDSA`
+  (`ed25519.go`). Keys are returned as `Signer`, found again by the `FindKeyPair` and
+  `FindPrivateKey` families, and their public half as `crypto/ed25519.PublicKey`, so they drop
+  into `x509.CreateCertificate` and `ed25519.Verify` unchanged. Only pure Ed25519 is signed:
+  Ed25519ph and Ed25519ctx need `CK_EDDSA_PARAMS`, which the binding does not yet marshal, and
+  `Sign` refuses them rather than silently signing the pure variant. An empty message is refused
+  too: the binding passes it to `C_Sign` as a NULL pointer, which SoftHSM2 rejects while leaving
+  the operation active on the session. `CKA_EC_POINT` is accepted
+  both DER-wrapped and bare, `CKA_EC_PARAMS` as the OID or the `"edwards25519"` string. An
+  Ed448 key — same `CKK_EC_EDWARDS` key type, no Go type to return it as — is skipped by
+  enumeration rather than failing it, and a template asking for one is refused before any
+  object is created. Both key-pair and private-key lookup check the private key's curve,
+  including when a public object or certificate with the same ID belongs to another curve.
 - `Config.PinFunc`, a callback that supplies the PIN as bytes to `Configure`, which wipes them as
   soon as the token has been logged into. For callers who would rather never hold the PIN in a
   Go `string`, which cannot be wiped.
