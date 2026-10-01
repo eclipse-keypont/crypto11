@@ -605,7 +605,9 @@ func loginUserType(userType int) (uint, error) {
 	switch {
 	case userType == DefaultUserType:
 		return pkcs11.CKU_USER, nil
-	case uint32(userType) == CryptoUser:
+	// CryptoUser (0x80000001) is a 32-bit CK_USER_TYPE value; the narrowing
+	// conversion is the documented normalization for this comparison.
+	case uint32(userType) == CryptoUser: // #nosec G115 -- deliberate CK_USER_TYPE normalization
 		return CryptoUser, nil
 	default:
 		return 0, fmt.Errorf("unsupported UserType %d: use DefaultUserType (CKU_USER) or CryptoUser", userType)

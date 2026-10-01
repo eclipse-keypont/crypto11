@@ -49,9 +49,9 @@ func MLKEMDeriveKey(paramSet MLKEMParameterSet, sharedSecret []byte) ([]byte, er
 
 	algBytes := []byte(mlkemAlgorithmID[paramSet])
 	x := make([]byte, 0, 4+len(algBytes)+4)
-	x = appendBE32(x, uint32(len(algBytes)))
+	x = appendBE32(x, uint32(len(algBytes))) // #nosec G115 -- algBytes is a fixed short algorithm ID
 	x = append(x, algBytes...)
-	x = appendBE32(x, uint32(outputLen*8))
+	x = appendBE32(x, uint32(outputLen*8)) // #nosec G115 -- outputLen is 16 or 32, so *8 <= 256
 
 	if paramSet == MLKEM512 {
 		return kmac128(sharedSecret, x, outputLen), nil
@@ -61,7 +61,8 @@ func MLKEMDeriveKey(paramSet MLKEMParameterSet, sharedSecret []byte) ([]byte, er
 
 // appendBE32 appends v as a big-endian 32-bit unsigned integer to b.
 func appendBE32(b []byte, v uint32) []byte {
-	return append(b, byte(v>>24), byte(v>>16), byte(v>>8), byte(v))
+	// byte(v>>n) is the intended big-endian byte extraction, not a lossy cast.
+	return append(b, byte(v>>24), byte(v>>16), byte(v>>8), byte(v)) // #nosec G115 -- big-endian byte extraction
 }
 
 // kmac128 computes KMAC128(K=key, X=data, L=outputLen bytes, S="") per NIST SP 800-185.
@@ -92,7 +93,7 @@ func kmac(h *sha3.SHAKE, rate int, key, data []byte, outputLen int) []byte {
 	defer h.Reset()
 	absorbKey(h, key, rate)
 	_, _ = h.Write(data)                               // never returns an error
-	_, _ = h.Write(rightEncode(uint64(outputLen * 8))) // never returns an error
+	_, _ = h.Write(rightEncode(uint64(outputLen * 8))) // #nosec G115 -- outputLen is 16/32; never returns an error
 	out := make([]byte, outputLen)
 	_, _ = h.Read(out) // XOF Read never returns an error
 	return out
@@ -103,7 +104,7 @@ func kmac(h *sha3.SHAKE, rate int, key, data []byte, outputLen int) []byte {
 // equivalent of bytepad(encodeString(key), rate), which allocates and abandons
 // an intermediate copy of the key at each step.
 func absorbKey(h *sha3.SHAKE, key []byte, rate int) {
-	prefix := leftEncode(uint64(rate))         // bytepad's left_encode(w)
+	prefix := leftEncode(uint64(rate))         // #nosec G115 -- rate is 168 or 136: non-negative widening
 	lenEnc := leftEncode(uint64(len(key)) * 8) // encode_string's left_encode(len(S)*8)
 	n := len(prefix) + len(lenEnc) + len(key)
 	buf := make([]byte, n+(rate-n%rate)%rate) // zero-padded to a whole number of blocks
@@ -131,7 +132,7 @@ func leftEncode(x uint64) []byte {
 	}
 	b := buf[n+1:]
 	result := make([]byte, 1+len(b))
-	result[0] = byte(len(b))
+	result[0] = byte(len(b)) // #nosec G115 -- len(b) <= 8: a length byte by construction
 	copy(result[1:], b)
 	return result
 }
@@ -151,7 +152,7 @@ func rightEncode(x uint64) []byte {
 	b := buf[n+1:]
 	result := make([]byte, len(b)+1)
 	copy(result, b)
-	result[len(b)] = byte(len(b))
+	result[len(b)] = byte(len(b)) // #nosec G115 -- len(b) <= 8: a length byte by construction
 	return result
 }
 
@@ -163,7 +164,7 @@ func encodeString(s []byte) []byte {
 // bytepad pads X to the next multiple of w bytes, prepended with left_encode(w),
 // per NIST SP 800-185 Section 2.3.
 func bytepad(x []byte, w int) []byte {
-	z := append(leftEncode(uint64(w)), x...)
+	z := append(leftEncode(uint64(w)), x...) // #nosec G115 -- w is the cSHAKE rate: non-negative widening
 	for len(z)%w != 0 {
 		z = append(z, 0)
 	}
