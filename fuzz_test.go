@@ -26,6 +26,7 @@ package crypto11
 import (
 	"bytes"
 	"crypto/ecdsa"
+	"crypto/ed25519"
 	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/x509"
@@ -170,6 +171,60 @@ func FuzzUnmarshalEcParams(f *testing.F) {
 		}
 		if !bytes.Equal(b, info.oid) {
 			t.Fatalf("resolved %x to %q, whose OID is %x", b, curve.Params().Name, info.oid)
+		}
+	})
+}
+
+// FuzzUnmarshalEd25519Point: whatever is accepted must be the 32 bytes the token supplied.
+func FuzzUnmarshalEd25519Point(f *testing.F) {
+	pub, _, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		f.Fatalf("generating a seed key: %v", err)
+	}
+	wrapped, err := asn1.Marshal([]byte(pub))
+	if err != nil {
+		f.Fatalf("marshalling the seed point: %v", err)
+	}
+
+	f.Add(wrapped)
+	f.Add([]byte(pub))                                     // bare
+	f.Add(wrapped[:len(wrapped)-1])                        // truncated
+	f.Add(append(bytes.Clone(wrapped), 0x00))              // trailing data
+	f.Add(append([]byte{0x04, 0x21}, make([]byte, 33)...)) // wrapped, one byte too long
+	f.Add([]byte(nil))
+	f.Add([]byte{0x04, 0x00})
+	f.Add(append([]byte{0x04, 0x1e}, make([]byte, 30)...))       // bare point that is also valid ASN.1
+	f.Add(append([]byte{0x03, 0x20}, make([]byte, 32)...))       // wrong tag
+	f.Add(append([]byte{0x04, 0x81, 0x20}, make([]byte, 32)...)) // non-minimal length
+
+	f.Fuzz(func(t *testing.T, b []byte) {
+		// encoding/asn1 is the oracle; rejecting a valid encoding is also a failure.
+		want := b
+		valid := len(b) == ed25519.PublicKeySize
+		if !valid {
+			var inner []byte
+			rest, err := asn1.Unmarshal(b, &inner)
+			valid = err == nil && len(rest) == 0 && len(inner) == ed25519.PublicKeySize
+			want = inner
+		}
+
+		key, err := unmarshalEd25519Point(b)
+		if (err == nil) != valid {
+			t.Fatalf("encoding %x: valid=%t, error=%v", b, valid, err)
+		}
+		if err != nil {
+			if key != nil {
+				t.Fatal("key returned alongside an error")
+			}
+			return
+		}
+		if !bytes.Equal(want, key) {
+			t.Fatalf("encoding %x: got %x, want %x", b, key, want)
+		}
+		original := bytes.Clone(b)
+		key[0] ^= 0xff
+		if !bytes.Equal(original, b) {
+			t.Fatal("public key aliases the input")
 		}
 	})
 }

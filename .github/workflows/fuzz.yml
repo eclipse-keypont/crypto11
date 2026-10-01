@@ -41,6 +41,7 @@ jobs:
           - FuzzParseCertificateValue
           - FuzzUnmarshalEcPoint
           - FuzzUnmarshalEcParams
+          - FuzzUnmarshalEd25519Point
           - FuzzDSASignatureRoundTrip
           - FuzzDSASignatureUnmarshalDER
           - FuzzMLKEMDeriveKey
