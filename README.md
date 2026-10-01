@@ -57,6 +57,7 @@ applications to cryptographic keys held in HSMs and other PKCS#11-backed hardwar
 |-----------|:--------------:|:----------------:|:-----------------:|------------------------------------------|
 | RSA       |       ✓        | PKCS#1 v1.5, PSS | PKCS#1 v1.5, OAEP | Via `crypto.Signer` / `crypto.Decrypter` |
 | ECDSA     |       ✓        |        ✓         |         —         | Via `crypto.Signer`                      |
+| Ed25519   |       ✓        |   pure Ed25519   |         —         | Via `crypto.Signer`; PKCS#11 v3.0 `CKM_EDDSA` |
 | DSA       |       ✓        |        ✓         |         —         | Via `crypto.Signer`                      |
 
 To verify signatures or encrypt messages, retrieve the public key and do it in software.

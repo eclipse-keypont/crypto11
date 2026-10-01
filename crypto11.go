@@ -14,9 +14,10 @@
 //
 // # Key Generation and Usage
 //
-// There is support for generating DSA, RSA and ECDSA keys. These keys
-// can be found later using FindKeyPair. All three key types implement
+// There is support for generating DSA, RSA, ECDSA and Ed25519 keys. These keys
+// can be found later using FindKeyPair. All four key types implement
 // the crypto.Signer interface and the RSA keys also implement crypto.Decrypter.
+// Ed25519 keys need a token that implements PKCS#11 v3.0's CKM_EDDSA.
 //
 // RSA keys obtained through FindKeyPair will need a type assertion to be
 // used for decryption. Assert either crypto.Decrypter or SignerDecrypter, as you
