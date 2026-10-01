@@ -5,8 +5,10 @@ name: Security Scan gosec
 # crypto, unsafe pointer arithmetic, ...). Runs on PRs and weekly so newly
 # added rules surface even without a code change.
 #
-# G115 (integer overflow on conversion) is excluded to match .golangci.yml:
-# it is extremely noisy against the PKCS#11 C-style API (CK_ULONG <-> int).
+# G115 (integer overflow on conversion) stays enabled. The PKCS#11 C-style
+# API (CK_ULONG <-> int) makes it noisy, but each intentional conversion is
+# marked individually with `//#nosec G115 -- <reason>` so the rule remains
+# active for any new, unannotated conversion.
 
 on:
   push:
@@ -40,4 +42,4 @@ jobs:
         run: go install github.com/securego/gosec/v2/cmd/gosec@deb54465fea23d19a77f037e11e6589021f8501d # v2.29.0
 
       - name: Run gosec
-        run: gosec -exclude=G115 ./...
+        run: gosec ./...

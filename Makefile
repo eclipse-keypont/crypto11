@@ -102,8 +102,10 @@ govulncheck:
 # common security issues (hardcoded credentials, weak crypto, unsafe pointer
 # arithmetic, ...).
 #
-# G115 (integer overflow on conversion) is excluded to match .golangci.yml:
-# it is extremely noisy against the PKCS#11 C-style API (CK_ULONG <-> int).
+# G115 (integer overflow on conversion) stays enabled. The PKCS#11 C-style
+# API (CK_ULONG <-> int) makes it noisy, but each intentional conversion is
+# marked individually with `//#nosec G115 -- <reason>` so the rule remains
+# active for any new, unannotated conversion.
 #
 # Install gosec (same version as CI):
 #   go install github.com/securego/gosec/v2/cmd/gosec@v2.29.0
@@ -111,7 +113,7 @@ GOSEC ?= gosec
 
 gosec:
 	$(call require,$(GOSEC),go install github.com/securego/gosec/v2/cmd/gosec@v2.29.0)
-	$(GOSEC) -exclude=G115 ./...
+	$(GOSEC) ./...
 
 # ── Licenses ─────────────────────────────────────────────────────────────────
 # Regenerates NOTICES.md from the module graph, rendering go-licenses.tpl.

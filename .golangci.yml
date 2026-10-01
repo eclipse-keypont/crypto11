@@ -17,13 +17,11 @@ linters:
     - copyloopvar    # detects unnecessary loop-var copies (Go 1.22+)
     - prealloc       # suggests slice preallocation
 
-  settings:
-    gosec:
-      excludes:
-        # G115: integer overflow on conversion — extremely noisy against the
-        # PKCS#11 C-style API (CK_ULONG <-> int). Re-enable if you want to
-        # audit those conversions explicitly.
-        - G115
+  # gosec settings intentionally omitted: G115 (integer overflow on
+  # conversion) is NOT excluded globally. The PKCS#11 C-style API (CK_ULONG
+  # <-> int) makes it noisy, so each intentional conversion carries an
+  # explicit `//#nosec G115 -- <reason>` annotation and the rule stays active
+  # for any new, unannotated conversion.
 
   exclusions:
     generated: lax

@@ -54,7 +54,9 @@ func exportRSAPublicKey(session *pkcs11Session, pubHandle pkcs11.ObjectHandle) (
 	if bigExponent.Sign() < 1 {
 		return nil, errMalformedRSAPublicKey
 	}
-	exponent := int(bigExponent.Uint64())
+	// BitLen() > 32 was rejected above and Sign() >= 1 guarantees a positive value,
+	// so the uint64 exponent fits in a positive int on every supported platform.
+	exponent := int(bigExponent.Uint64()) // #nosec G115 -- bounded to 32 bits by the checks above
 	result := rsa.PublicKey{
 		N: modulus,
 		E: exponent,
