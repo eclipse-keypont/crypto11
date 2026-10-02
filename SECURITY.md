@@ -107,6 +107,7 @@ If you need to confirm that the source you are running is what we published, see
 
 ## Security posture
 
-Every push and pull request runs golangci-lint, `go vet`, govulncheck, CodeQL, secret scanning,
-dependency review and an [OpenSSF Scorecard](https://scorecard.dev/viewer/?uri=github.com/eclipse-keypont/crypto11)
+Every push and pull request runs golangci-lint, `go vet`, govulncheck, CodeQL, native GitHub secret
+scanning, dependency review and an
+[OpenSSF Scorecard](https://scorecard.dev/viewer/?uri=github.com/eclipse-keypont/crypto11)
 evaluation. These reduce the odds of a defect reaching a release; they do not replace your report.

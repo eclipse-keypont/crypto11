@@ -248,7 +248,7 @@ reporting or the Eclipse Foundation security team — and which versions receive
 ### CI/CD & supply chain
 
 - Unified security/quality pipeline shared across the pkcs11-go / crypto11 / gose projects:
-  CodeQL, govulncheck, Gitleaks secret scanning, OpenSSF Scorecard, dependency review, and
+  CodeQL, govulncheck, native GitHub secret scanning, OpenSSF Scorecard, dependency review, and
   golangci-lint gate every push.
 - All third-party GitHub Actions pinned to commit SHAs.
 - Travis CI configuration removed; it was no longer in use.

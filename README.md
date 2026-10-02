@@ -18,7 +18,6 @@
 [![Vulnerability scan](https://img.shields.io/github/actions/workflow/status/eclipse-keypont/crypto11/govulncheck.yml?branch=master&style=flat-square&logo=githubactions&logoColor=white&label=vulnerability%20scan)](https://github.com/eclipse-keypont/crypto11/actions/workflows/govulncheck.yml)
 [![CodeQL](https://img.shields.io/github/actions/workflow/status/eclipse-keypont/crypto11/codeql.yml?branch=master&style=flat-square&logo=githubactions&logoColor=white&label=codeql)](https://github.com/eclipse-keypont/crypto11/actions/workflows/codeql.yml)
 [![Fuzz](https://img.shields.io/github/actions/workflow/status/eclipse-keypont/crypto11/fuzz.yml?style=flat-square&logo=githubactions&logoColor=white&label=fuzz)](https://github.com/eclipse-keypont/crypto11/actions/workflows/fuzz.yml)
-[![Secret scan](https://img.shields.io/github/actions/workflow/status/eclipse-keypont/crypto11/secret-scan.yml?branch=master&style=flat-square&logo=githubactions&logoColor=white&label=secret%20scan)](https://github.com/eclipse-keypont/crypto11/actions/workflows/secret-scan.yml)
 [![Release build](https://img.shields.io/github/actions/workflow/status/eclipse-keypont/crypto11/release.yml?style=flat-square&logo=githubactions&logoColor=white&label=release%20build)](https://github.com/eclipse-keypont/crypto11/actions/workflows/release.yml)
 [![OpenSSF Scorecard](https://img.shields.io/ossf-scorecard/github.com/eclipse-keypont/crypto11?style=flat-square&logo=openssf&logoColor=white&label=openssf%20scorecard)](https://scorecard.dev/viewer/?uri=github.com/eclipse-keypont/crypto11)
 

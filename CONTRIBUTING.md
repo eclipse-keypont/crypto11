@@ -161,9 +161,9 @@ predictor of a green pull request:
 | `make notices` | regenerates [`NOTICES.md`](./NOTICES.md) | — |
 | `make sbom` | regenerates the CycloneDX SBOM | `release.yml` |
 
-CodeQL, secret scanning, dependency review and the OpenSSF Scorecard gate also run on every pull
-request; they need no local setup, but a Scorecard regression (for example, an unpinned GitHub
-Action) will block the merge.
+CodeQL, native GitHub secret scanning, dependency review and the OpenSSF Scorecard gate also run
+on every pull request; they need no local setup, but a Scorecard regression (for example, an
+unpinned GitHub Action) will block the merge.
 
 ## Testing against a token
 
