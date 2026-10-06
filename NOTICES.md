@@ -4,7 +4,7 @@ This project uses the following third-party Go modules.
 
 | Package | License | License URL |
 |---------|---------|-------------|
-| `github.com/eclipse-keypont/pkcs11-go` | MIT | [Link](https://github.com/eclipse-keypont/pkcs11-go/blob/v1.1.1/LICENSE) |
+| `github.com/eclipse-keypont/pkcs11-go` | MIT | [Link](https://github.com/eclipse-keypont/pkcs11-go/blob/v1.2.0-rc2/LICENSE) |
 
 ## Vendored source (in-tree)
 
