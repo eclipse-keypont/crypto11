@@ -38,6 +38,20 @@ const (
 	CKM_NC_SHA512_HMAC_KEY_GEN = CKM_NCIPHER + 0x27
 )
 
+// KeyedHash is a hash.Hash that is a keyed MAC (HMAC) rather than a bare digest.
+//
+// crypto/hmac's concrete type is unexported, so a consumer cannot recognise a
+// keyed MAC by type assertion alone. A keyed MAC implemented outside crypto/hmac
+// — for example the HSM-backed HMAC returned by SecretKey.NewHMAC — opts in by
+// implementing this interface, which lets such a consumer accept it while still
+// rejecting an unkeyed digest such as sha256.New().
+type KeyedHash interface {
+	hash.Hash
+	// IsKeyedHash marks the implementation as a keyed MAC. It carries no
+	// behaviour; it exists only to make keyed-ness explicit and checkable.
+	IsKeyedHash()
+}
+
 type hmacImplementation struct {
 	// PKCS#11 session to use
 	session *pkcs11Session
@@ -64,6 +78,14 @@ type hmacImplementation struct {
 	// Result, or nil if we don't have the answer yet
 	result []byte
 }
+
+// IsKeyedHash marks hmacImplementation as a keyed MAC. It satisfies the
+// KeyedHash interface (and, structurally, gose.KeyedHash) so that consumers
+// requiring a keyed MAC accept the HSM-backed HMAC returned by NewHMAC.
+func (*hmacImplementation) IsKeyedHash() {}
+
+// hmacImplementation is a keyed MAC; keep the marker in place.
+var _ KeyedHash = (*hmacImplementation)(nil)
 
 type hmacInfo struct {
 	size      int
