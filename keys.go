@@ -6,6 +6,7 @@ package crypto11
 
 import (
 	"crypto"
+	"crypto/ed25519"
 	"crypto/x509"
 	"errors"
 	"fmt"
@@ -234,6 +235,23 @@ func (c *Context) makeKeyPair(session *pkcs11Session, privHandle *pkcs11.ObjectH
 				return nil, nil, err
 			}
 			result.pubKeyHandle = *pubHandle
+		}
+
+		result.pubKey = pub
+		return result, certificate, nil
+
+	case pkcs11.CKK_EC_EDWARDS:
+		if err := checkEd25519PrivateKey(session, *privHandle); err != nil {
+			return nil, nil, err
+		}
+		result := &pkcs11PrivateKeyEd25519{pkcs11PrivateKey: *resultPkcs11PrivateKey}
+		if pubHandle != nil {
+			if pub, err = exportEd25519PublicKey(session, *pubHandle); err != nil {
+				return nil, nil, err
+			}
+			result.pubKeyHandle = *pubHandle
+		} else if _, ok := pub.(ed25519.PublicKey); !ok {
+			return nil, nil, fmt.Errorf("%w: certificate public key is %T, not Ed25519", errUnsupportedKeyType, pub)
 		}
 
 		result.pubKey = pub
@@ -574,6 +592,13 @@ func (c *Context) makePrivateKey(session *pkcs11Session, privHandle *pkcs11.Obje
 		result := &pkcs11PrivateKeyECDSA{pkcs11PrivateKey: resultPkcs11PrivateKey}
 		return result, nil
 
+	case pkcs11.CKK_EC_EDWARDS:
+		if err := checkEd25519PrivateKey(session, *privHandle); err != nil {
+			return nil, err
+		}
+		result := &pkcs11PrivateKeyEd25519{pkcs11PrivateKey: resultPkcs11PrivateKey}
+		return result, nil
+
 	default:
 		return nil, fmt.Errorf("%w: %X", errUnsupportedKeyType, keyType)
 	}
@@ -740,6 +765,8 @@ func (c *Context) GetAttributes(key interface{}, attributes []AttributeType) (a 
 		handle, owner = k.handle, k.context
 	case *pkcs11PrivateKeyECDSA:
 		handle, owner = k.handle, k.context
+	case *pkcs11PrivateKeyEd25519:
+		handle, owner = k.handle, k.context
 	case *pkcs11MLKEMKeyPair:
 		handle, owner = k.handle, k.context
 	case *SecretKey:
@@ -788,6 +815,8 @@ func (c *Context) GetPubAttributes(key interface{}, attributes []AttributeType) 
 	case *pkcs11PrivateKeyRSA:
 		handle, owner = k.pubKeyHandle, k.context
 	case *pkcs11PrivateKeyECDSA:
+		handle, owner = k.pubKeyHandle, k.context
+	case *pkcs11PrivateKeyEd25519:
 		handle, owner = k.pubKeyHandle, k.context
 	case *pkcs11MLKEMKeyPair:
 		handle, owner = k.pubKeyHandle, k.context
