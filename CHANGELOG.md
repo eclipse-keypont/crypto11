@@ -250,6 +250,12 @@ reporting or the Eclipse Foundation security team — and which versions receive
   `go.mod`, `.go-version`, and the version noted in `CONTRIBUTING.md`). go1.27.2 is a patch
   release that fixes the `net/http` and `net/http/internal/http2` standard-library
   vulnerabilities flagged by `govulncheck` on go1.27.1.
+- **`gosec` pinned to a `master` commit** (`7157726`, `x/tools` v0.52.0) in
+  `.github/workflows/gosec.yml` and the `Makefile`, instead of the v2.29.0 release. The
+  v2.29.0 release links `golang.org/x/tools` v0.49.0, which cannot decode the go1.27.2
+  export data (version 5 is greater than the maximum supported version 4) and fails the
+  scan with an import error. Move back to a tagged release once one ships
+  `x/tools` >= v0.50.0.
 
 ### CI/CD & supply chain
 
