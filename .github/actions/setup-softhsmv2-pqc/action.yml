@@ -1,0 +1,139 @@
+# SPDX-FileCopyrightText: 2026 Thales Group and the crypto11 Contributors
+# SPDX-FileCopyrightText: 2026 The Eclipse Foundation KeyPont project maintainers
+# SPDX-License-Identifier: MIT
+#
+# Builds a PKCS #11 module with full post-quantum support and exports
+# PKCS11_MODULE for the test suites.
+#
+# This is the SoftHSMv2 path. It is deliberately separate from the SoftHSMv3
+# (pqctoday-hsm) path so both can run side by side: this action only ever
+# produces a SoftHSMv2 module and never touches the pqctoday configuration.
+#
+# Why build SoftHSMv2 from source instead of `apt-get install softhsm2`:
+#
+#   * The apt package on ubuntu-24.04 is SoftHSMv2 2.6.1, which advertises
+#     wrong HMAC min/max key sizes (fixed upstream in 2.7.0, PR #522). That
+#     makes TestGenerateHMACKeyFallback/SHA384 and /SHA512 fail with
+#     CKR_KEY_SIZE_RANGE.
+#   * ML-KEM (CKM_ML_KEM_KEY_PAIR_GEN / CKM_ML_KEM) and ML-DSA are only in
+#     SoftHSMv2 `main` (PRs #874, #809/#867/#870), not in any release yet.
+#
+# OpenSSL is NOT built here. ML-KEM/ML-DSA need OpenSSL >= 3.5, which the
+# ubuntu-26.04 runner image ships (3.5.5) — so the calling job must run on
+# ubuntu-26.04 and this action uses that system OpenSSL. ubuntu-24.04 ships
+# 3.0.13 and cannot be used; the action fails fast with a clear message if the
+# detected OpenSSL is too old.
+#
+# The SoftHSMv2 build is cached on (OS, arch, OpenSSL version, SoftHSM commit);
+# a cache hit skips the source build entirely.
+
+name: Setup SoftHSMv2 (PQC)
+description: Build SoftHSMv2 main with ML-KEM/ML-DSA against the runner's OpenSSL 3.5 and export PKCS11_MODULE
+
+inputs:
+  softhsm-commit:
+    description: SoftHSMv2 commit to build (main, post-2.7.0, has ML-KEM/ML-DSA)
+    required: false
+    default: "9ad87341c94ffdf1364ecf27b715475e0d80b0dd"
+
+outputs:
+  module:
+    description: Absolute path to the built libsofthsm2.so
+    value: ${{ steps.export.outputs.module }}
+
+runs:
+  using: composite
+  steps:
+    - name: Install build dependencies
+      shell: bash
+      run: |
+        sudo apt-get update -qq
+        sudo apt-get install -y --no-install-recommends \
+          build-essential cmake pkg-config zlib1g-dev \
+          autoconf automake libtool git curl ca-certificates \
+          openssl libssl-dev opensc
+
+    - name: Detect OpenSSL version
+      id: openssl
+      shell: bash
+      run: |
+        set -euo pipefail
+        ver="$(openssl version | awk '{print $2}')"
+        echo "version=$ver" >> "$GITHUB_OUTPUT"
+        echo "OpenSSL $ver"
+        # ML-KEM/ML-DSA are only in OpenSSL >= 3.5. ubuntu-26.04 ships 3.5.x;
+        # ubuntu-24.04 ships 3.0.x, which is why this job must run on 26.04.
+        major="${ver%%.*}"; rest="${ver#*.}"; minor="${rest%%.*}"
+        if [ "$major" -lt 3 ] || { [ "$major" -eq 3 ] && [ "$minor" -lt 5 ]; }; then
+          echo "::error::OpenSSL $ver is too old for ML-KEM/ML-DSA (need >= 3.5); run this job on ubuntu-26.04"
+          exit 1
+        fi
+
+    - name: Cache SoftHSMv2
+      id: cache
+      uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+      with:
+        path: ~/.softhsm-pqc
+        key: softhsm-pqc-${{ runner.os }}-${{ runner.arch }}-openssl${{ steps.openssl.outputs.version }}-softhsm${{ inputs.softhsm-commit }}
+
+    - name: Build SoftHSMv2 (PQC)
+      if: steps.cache.outputs.cache-hit != 'true'
+      shell: bash
+      env:
+        SOFTHSM_COMMIT: ${{ inputs.softhsm-commit }}
+      run: |
+        set -euo pipefail
+        PREFIX="$HOME/.softhsm-pqc"
+        BUILD="$RUNNER_TEMP/softhsm-pqc-build"
+        mkdir -p "$PREFIX" "$BUILD"
+        cd "$BUILD"
+
+        # SoftHSMv2 `main` is the only branch with ML-KEM/ML-DSA (PRs #874,
+        # #809/#867/#870); no release has them yet. It is built against the
+        # runner's OpenSSL 3.5, which provides the PQC primitives.
+        git clone --filter=blob:none https://github.com/softhsm/SoftHSMv2.git softhsm2
+        cd softhsm2
+        git checkout "$SOFTHSM_COMMIT"
+        # SYSCONFDIR/LOCALSTATEDIR default to the absolute /etc and /var, which
+        # `cmake --install` cannot write to as a non-root user. Redirecting them
+        # under the prefix keeps the install self-contained (the tests set
+        # SOFTHSM2_CONF themselves, so the installed conf is not used).
+        cmake -B build \
+          -DCMAKE_BUILD_TYPE=Release \
+          -DCMAKE_INSTALL_PREFIX="$PREFIX/softhsm" \
+          -DCMAKE_INSTALL_SYSCONFDIR="$PREFIX/softhsm/etc" \
+          -DCMAKE_INSTALL_LOCALSTATEDIR="$PREFIX/softhsm/var" \
+          -DWITH_CRYPTO_BACKEND=openssl \
+          -DENABLE_MLKEM=ON \
+          -DENABLE_MLDSA=ON \
+          -DENABLE_P11_KIT=OFF \
+          -DBUILD_TESTS=OFF
+        cmake --build build -j"$(nproc)"
+        cmake --install build
+
+    - name: Export PKCS11_MODULE
+      id: export
+      shell: bash
+      run: |
+        set -euo pipefail
+        MODULE="$(find "$HOME/.softhsm-pqc/softhsm" -name 'libsofthsm2.so' -print -quit)"
+        if [ -z "$MODULE" ]; then
+          echo "::error::libsofthsm2.so not found under $HOME/.softhsm-pqc/softhsm"
+          exit 1
+        fi
+        echo "PKCS11_MODULE=$MODULE" >> "$GITHUB_ENV"
+        echo "module=$MODULE" >> "$GITHUB_OUTPUT"
+        echo "PKCS11_MODULE=$MODULE"
+
+    - name: Verify ML-KEM and ML-DSA are advertised
+      shell: bash
+      run: |
+        set -euo pipefail
+        # pkcs11-tool -M lists the mechanisms the module advertises. SoftHSM
+        # always exposes a slot, so no token is needed for this.
+        MECHS="$(pkcs11-tool --module "$PKCS11_MODULE" -M 2>/dev/null || true)"
+        echo "$MECHS" | grep -iE 'ML[-_ ]?KEM' \
+          || { echo "::error::ML-KEM not advertised by $PKCS11_MODULE"; exit 1; }
+        echo "$MECHS" | grep -iE 'ML[-_ ]?DSA' \
+          || { echo "::error::ML-DSA not advertised by $PKCS11_MODULE"; exit 1; }
+        echo "✔ ML-KEM and ML-DSA advertised by $PKCS11_MODULE"

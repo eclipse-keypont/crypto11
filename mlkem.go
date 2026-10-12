@@ -213,6 +213,12 @@ func (c *Context) GenerateMLKEMKeyPairWithAttributes(public, private AttributeSe
 				pkcs11.BytesToULong(attr.Value), paramSet)
 		}
 	}
+	// CKA_PARAMETER_SET is a public-key attribute: the token derives the private
+	// key's parameter set from the public key. SoftHSMv2 marks it ck4 on the
+	// private ML-KEM object ("MUST not be specified when generated") and rejects
+	// a private template that carries it with CKR_ATTRIBUTE_READ_ONLY, so drop it
+	// from the private template even when the caller supplied it.
+	private.Unset(CkaParameterSet)
 	var k MLKEMKeyPair
 	err := c.withSession(func(session *pkcs11Session) error {
 		public.AddIfNotPresent([]*pkcs11.Attribute{
@@ -228,7 +234,6 @@ func (c *Context) GenerateMLKEMKeyPairWithAttributes(public, private AttributeSe
 			pkcs11.NewAttribute(pkcs11.CKA_SENSITIVE, true),
 			pkcs11.NewAttribute(pkcs11.CKA_EXTRACTABLE, false),
 			pkcs11.NewAttribute(pkcs11.CKA_DECAPSULATE, true),
-			pkcs11.NewAttribute(pkcs11.CKA_PARAMETER_SET, paramSet),
 		})
 		mech := pkcs11.NewMechanism(pkcs11.CKM_ML_KEM_KEY_PAIR_GEN, nil)
 		pubHandle, privHandle, err := session.ctx.GenerateKeyPair(

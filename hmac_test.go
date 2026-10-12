@@ -64,17 +64,25 @@ func TestHmacSumAfterSessionReleased(t *testing.T) {
 func TestGenerateHMACKeyFallback(t *testing.T) {
 	ctx := testContext(t)
 
+	// keyBits is the key length to generate, in bits. It is the digest size of
+	// the matching hash, which is the natural HMAC key size and — importantly —
+	// never below the mechanism's minimum: PKCS#11 requires a SHA384-HMAC key of
+	// at least 48 bytes and a SHA512-HMAC key of at least 64 bytes, so a fixed
+	// 256-bit key is rejected with CKR_KEY_SIZE_RANGE by a spec-conformant token
+	// (SoftHSMv2 >= 2.7.0). The apt 2.6.1 package advertised a bogus minimum of
+	// one byte, which is why the undersized key used to slip through.
 	cases := []struct {
-		name   string
-		cipher *SymmetricCipher
-		mech   uint
-		size   int
+		name    string
+		cipher  *SymmetricCipher
+		mech    uint
+		size    int
+		keyBits int
 	}{
-		{"SHA1", CipherHMACSHA1, pkcs11.CKM_SHA_1_HMAC, 20},
-		{"SHA224", CipherHMACSHA224, pkcs11.CKM_SHA224_HMAC, 28},
-		{"SHA256", CipherHMACSHA256, pkcs11.CKM_SHA256_HMAC, 32},
-		{"SHA384", CipherHMACSHA384, pkcs11.CKM_SHA384_HMAC, 48},
-		{"SHA512", CipherHMACSHA512, pkcs11.CKM_SHA512_HMAC, 64},
+		{"SHA1", CipherHMACSHA1, pkcs11.CKM_SHA_1_HMAC, 20, 160},
+		{"SHA224", CipherHMACSHA224, pkcs11.CKM_SHA224_HMAC, 28, 224},
+		{"SHA256", CipherHMACSHA256, pkcs11.CKM_SHA256_HMAC, 32, 256},
+		{"SHA384", CipherHMACSHA384, pkcs11.CKM_SHA384_HMAC, 48, 384},
+		{"SHA512", CipherHMACSHA512, pkcs11.CKM_SHA512_HMAC, 64, 512},
 	}
 
 	for _, tc := range cases {
@@ -82,7 +90,7 @@ func TestGenerateHMACKeyFallback(t *testing.T) {
 			// The generation itself is the assertion for the fallback fix: on a token
 			// without the vendor mech this only succeeds because of the generic-secret
 			// fall-through.
-			key, err := ctx.GenerateSecretKey(randomBytes(), 256, tc.cipher)
+			key, err := ctx.GenerateSecretKey(randomBytes(), tc.keyBits, tc.cipher)
 			require.NoError(t, err)
 			require.NotNil(t, key)
 			defer func() { _ = key.Delete() }()
