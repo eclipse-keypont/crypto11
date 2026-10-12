@@ -1,0 +1,150 @@
+# SPDX-FileCopyrightText: 2026 Thales Group and the crypto11 Contributors
+# SPDX-FileCopyrightText: 2026 The Eclipse Foundation KeyPont project maintainers
+# SPDX-License-Identifier: MIT
+#
+# Builds the SoftHSMv3 PKCS #11 module (pqctoday-hsm) with full post-quantum
+# support and exports PKCS11_MODULE for the test suite.
+#
+# This is the SoftHSMv3 path. It is deliberately separate from the SoftHSMv2
+# path (setup-softhsmv2-pqc) so both can run side by side: this action only ever
+# produces a SoftHSMv3 module and never touches the SoftHSMv2 configuration.
+#
+# Why an Arch Linux container instead of the runner's OpenSSL:
+#
+#   * SoftHSMv3 vendors pkcs11-provider, which uses OpenSSL 3.6 EVP parameters
+#     (OSSL_PKEY_PARAM_SECURITY_CATEGORY, OSSL_PKEY_PARAM_CMS_RI_TYPE). No
+#     GitHub-hosted runner image ships OpenSSL 3.6: ubuntu-24.04 has 3.0.13 and
+#     ubuntu-26.04 has 3.5.5, both too old. Building OpenSSL from source is slow
+#     and is deliberately avoided.
+#   * archlinux:latest ships OpenSSL 3.6.x, and Arch's `openssl` package bundles
+#     the headers, so the module builds against a prebuilt OpenSSL with no
+#     source build. The job runs inside the container (see the `container:` key
+#     in the workflow), so this action installs packages with pacman and never
+#     uses sudo.
+#   * Only SoftHSMv3 itself is built from source (it is not distributed as a
+#     prebuilt artifact), pinned to a release commit, and the result is cached.
+#
+# The build is cached on (container, arch, SoftHSMv3 commit); a cache hit skips
+# the source build entirely.
+
+name: Setup SoftHSMv3 (PQC)
+description: Build pqctoday-hsm (SoftHSMv3) with ML-KEM/ML-DSA against the container's OpenSSL and export PKCS11_MODULE
+
+inputs:
+  softhsm-commit:
+    description: pqctoday-hsm commit to build (v0.29.0)
+    required: false
+    default: "8ae04adc5029dcb845140aa103977ed95c73520b"
+
+outputs:
+  module:
+    description: Absolute path to the built libsofthsmv3.so
+    value: ${{ steps.export.outputs.module }}
+
+runs:
+  using: composite
+  steps:
+    - name: Install build dependencies
+      shell: bash
+      run: |
+        # Running inside the archlinux container: root, no sudo, pacman.
+        # -Syu (full upgrade) avoids Arch's partial-upgrade breakage; the
+        # container is ephemeral so upgrading everything is fine.
+        # Arch's `openssl` package bundles the headers (no separate -dev split).
+        pacman -Syu --noconfirm --needed \
+          base-devel cmake pkgconf openssl \
+          git curl ca-certificates opensc zstd
+
+    - name: Verify OpenSSL >= 3.6
+      shell: bash
+      run: |
+        set -euo pipefail
+        openssl version
+        # SoftHSMv3's vendored pkcs11-provider needs OpenSSL 3.6 EVP parameters
+        # (OSSL_PKEY_PARAM_SECURITY_CATEGORY). Assert it here so a container-image
+        # regression fails with a clear message instead of deep inside CMake.
+        have="$(openssl version | awk '{print $2}')"
+        need="3.6.0"
+        if [ "$(printf '%s\n%s\n' "$need" "$have" | sort -V | head -n1)" != "$need" ]; then
+          echo "::error::SoftHSMv3 needs OpenSSL >= $need; container has $have"
+          exit 1
+        fi
+
+    - name: Cache SoftHSMv3
+      id: cache
+      uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+      with:
+        path: ~/.softhsmv3-pqc
+        key: softhsmv3-pqc-archlinux-${{ runner.arch }}-softhsm${{ inputs.softhsm-commit }}
+
+    - name: Build SoftHSMv3 (PQC)
+      if: steps.cache.outputs.cache-hit != 'true'
+      shell: bash
+      env:
+        SOFTHSM_COMMIT: ${{ inputs.softhsm-commit }}
+      run: |
+        set -euo pipefail
+        PREFIX="$HOME/.softhsmv3-pqc"
+        BUILD="$RUNNER_TEMP/softhsmv3-pqc-build"
+        mkdir -p "$PREFIX" "$BUILD"
+        cd "$BUILD"
+
+        # ── SoftHSMv3 (pqctoday-hsm) ─────────────────────────────────────────
+        # Submodules are required: the stateful hash-based signature engines
+        # (LMS/HSS, XMSS) live in src/lib/crypto/stateful/{hash-sigs,xmss-reference}.
+        git clone --filter=blob:none --recurse-submodules \
+          https://github.com/pqctoday-org/pqctoday-hsm.git softhsmv3
+        cd softhsmv3
+        git checkout "$SOFTHSM_COMMIT"
+        git submodule update --init --recursive
+
+        # PQC (ML-KEM/ML-DSA/SLH-DSA) is always compiled in — unlike SoftHSMv2
+        # there are no ENABLE_MLKEM/ENABLE_MLDSA switches, and the crypto backend
+        # is hardcoded to OpenSSL. CMake enforces OpenSSL >= 3.5.0; the vendored
+        # pkcs11-provider additionally needs OpenSSL 3.6.
+        #
+        # -include cstdint: the pinned source relies on a transitive <cstdint>
+        # include that GCC 15+ (Arch) no longer provides, so uint8_t fails to
+        # resolve. Forcing the include is harmless on older toolchains.
+        cmake -B build \
+          -DCMAKE_BUILD_TYPE=Release \
+          -DCMAKE_INSTALL_PREFIX="$PREFIX/softhsm" \
+          -DBUILD_TESTS=OFF \
+          -DCMAKE_CXX_FLAGS="-include cstdint"
+        cmake --build build -j"$(nproc)"
+        cmake --install build
+
+    - name: Export PKCS11_MODULE
+      id: export
+      shell: bash
+      run: |
+        set -euo pipefail
+        MODULE="$(find "$HOME/.softhsmv3-pqc/softhsm" -name 'libsofthsmv3.so' -print -quit)"
+        if [ -z "$MODULE" ]; then
+          echo "::error::libsofthsmv3.so not found under $HOME/.softhsmv3-pqc/softhsm"
+          exit 1
+        fi
+        echo "PKCS11_MODULE=$MODULE" >> "$GITHUB_ENV"
+        echo "module=$MODULE" >> "$GITHUB_OUTPUT"
+        echo "PKCS11_MODULE=$MODULE"
+
+    - name: Verify ML-KEM and ML-DSA are advertised
+      shell: bash
+      run: |
+        set -euo pipefail
+        # pkcs11-tool -M lists the mechanisms the module advertises. SoftHSM
+        # needs a config file to initialise (C_Initialize fails without one), so
+        # point it at a throwaway token directory. No token is needed to list
+        # mechanisms.
+        CONF_DIR="$(mktemp -d)"
+        mkdir -p "$CONF_DIR/tokens"
+        printf 'directories.tokendir = %s\nobjectstore.backend = file\nlog.level = ERROR\n' \
+          "$CONF_DIR/tokens" > "$CONF_DIR/softhsm2.conf"
+        MECHS="$(SOFTHSM2_CONF="$CONF_DIR/softhsm2.conf" \
+          pkcs11-tool --module "$PKCS11_MODULE" -M 2>/dev/null || true)"
+        echo "$MECHS" | grep -iE 'ML[-_ ]?KEM' \
+          || { echo "::error::ML-KEM not advertised by $PKCS11_MODULE"; exit 1; }
+        echo "$MECHS" | grep -iE 'ML[-_ ]?DSA' \
+          || { echo "::error::ML-DSA not advertised by $PKCS11_MODULE"; exit 1; }
+        echo "✔ ML-KEM and ML-DSA advertised by $PKCS11_MODULE"
+
