@@ -244,8 +244,12 @@ reporting or the Eclipse Foundation security team — and which versions receive
 - `go.mod` follows the two-directive policy adopted on `master` in
   [#137](https://github.com/eclipse-keypont/crypto11/issues/137): `go 1.25.0` is the minimum a
   consumer needs — lowered from `go 1.26.1` in v1.7.0-rc1, since a library's `go` directive is a
-  floor imposed on every importer — and `toolchain go1.27.1` is what maintainers build and test
+  floor imposed on every importer — and `toolchain go1.27.2` is what maintainers build and test
   with. `.go-version` tracks the toolchain.
+- Build and test toolchain bumped from `go1.27.1` to `go1.27.2` (`toolchain` directive in
+  `go.mod`, `.go-version`, and the version noted in `CONTRIBUTING.md`). go1.27.2 is a patch
+  release that fixes the `net/http` and `net/http/internal/http2` standard-library
+  vulnerabilities flagged by `govulncheck` on go1.27.1.
 
 ### CI/CD & supply chain
 

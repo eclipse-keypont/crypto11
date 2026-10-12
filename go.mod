@@ -2,7 +2,7 @@ module github.com/eclipse-keypont/crypto11/v2
 
 go 1.25.0
 
-toolchain go1.27.1
+toolchain go1.27.2
 
 require (
 	github.com/eclipse-keypont/pkcs11-go v1.2.0-rc2
