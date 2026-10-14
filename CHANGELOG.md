@@ -210,7 +210,7 @@ reporting or the Eclipse Foundation security team — and which versions receive
 
 - **crypto11 no longer contains any cgo of its own.** The `CK_ULONG` conversions were the last
   `import "C"` in the package; they now delegate to `cryptoki.ULongToBytes` / `cryptoki.BytesToULong`,
-  added in pkcs11-go v1.1.0. This release requires v1.2.0-rc2, which carries the binding's own
+  added in pkcs11-go v1.1.0. This release requires v1.2.0-rc3, which carries the binding's own
   fixes for the Synapse security findings
   ([eclipse-keypont/pkcs11-go#15](https://github.com/eclipse-keypont/pkcs11-go/pull/15)) and the
   consolidated security review of the `cryptoki` and `p11` packages (memory-safety, input-validation
