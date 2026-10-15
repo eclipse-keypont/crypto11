@@ -6,6 +6,9 @@ package crypto11
 
 import (
 	"context"
+	"crypto"
+	"crypto/rand"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -107,7 +110,8 @@ func TestPoolStatsMarshalsToJSON(t *testing.T) {
 
 	assert.JSONEq(t, `{
 		"Capacity": 3, "Available": 1, "Active": 2, "InUse": 2, "MaxCapacity": 3,
-		"WaitCount": 1, "WaitTime": 250000000, "IdleTimeout": 0, "IdleClosed": 0
+		"WaitCount": 1, "WaitTime": 250000000, "IdleTimeout": 0, "IdleClosed": 0,
+		"IdleReused": 0
 	}`, string(encoded))
 }
 
@@ -236,4 +240,108 @@ func TestCloseWaitsForOperationsInFlight(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("operation queued behind Close never returned")
 	}
+}
+
+// TestReadOnlySessionsFlags checks that Config.ReadOnlySessions clears
+// CKF_RW_SESSION on both the persistent session and the pooled sessions, while
+// keeping the mandatory CKF_SERIAL_SESSION.
+func TestReadOnlySessionsFlags(t *testing.T) {
+	cfg := testConfig(t)
+	cfg.ReadOnlySessions = true
+	ctx, err := Configure(cfg)
+	require.NoError(t, err)
+	defer ctx.Close()
+
+	info, err := ctx.ctx.GetSessionInfo(ctx.persistentSession)
+	require.NoError(t, err)
+	assert.Zero(t, info.Flags&pkcs11.CKF_RW_SESSION, "the persistent session must be read-only")
+	assert.NotZero(t, info.Flags&pkcs11.CKF_SERIAL_SESSION, "CKF_SERIAL_SESSION is mandatory")
+
+	err = ctx.withSession(func(session *pkcs11Session) error {
+		info, err := session.ctx.GetSessionInfo(session.handle)
+		if err != nil {
+			return err
+		}
+		assert.Zero(t, info.Flags&pkcs11.CKF_RW_SESSION, "a pooled session must be read-only")
+		assert.NotZero(t, info.Flags&pkcs11.CKF_SERIAL_SESSION)
+		return nil
+	})
+	require.NoError(t, err)
+}
+
+// TestReadOnlySessionsDefaultIsReadWrite is the control for the option: without
+// it the sessions keep CKF_RW_SESSION, so the default path is unchanged.
+func TestReadOnlySessionsDefaultIsReadWrite(t *testing.T) {
+	ctx := testContext(t)
+
+	info, err := ctx.ctx.GetSessionInfo(ctx.persistentSession)
+	require.NoError(t, err)
+	assert.NotZero(t, info.Flags&pkcs11.CKF_RW_SESSION, "the default must stay read/write")
+}
+
+// TestReadOnlySessionsBlockKeyGeneration documents the cost of the option: a
+// read-only session cannot create objects, so key generation fails. Callers
+// that need to generate keys must not set ReadOnlySessions.
+func TestReadOnlySessionsBlockKeyGeneration(t *testing.T) {
+	cfg := testConfig(t)
+	cfg.ReadOnlySessions = true
+	ctx, err := Configure(cfg)
+	require.NoError(t, err)
+	defer ctx.Close()
+
+	_, err = ctx.GenerateRSAKeyPair(randomBytes(), 2048)
+	require.Error(t, err)
+	var p11Err pkcs11.Error
+	require.True(t, errors.As(err, &p11Err))
+	assert.Equal(t, pkcs11.Error(pkcs11.CKR_SESSION_READ_ONLY), p11Err)
+}
+
+// TestReadOnlySessionsSignExistingKey covers the intended use of the option: a
+// key provisioned elsewhere can still be used to sign through a read-only
+// session.
+func TestReadOnlySessionsSignExistingKey(t *testing.T) {
+	// Provision the key with a normal read/write Context.
+	rw := testContext(t)
+	id := randomBytes()
+	_, err := rw.GenerateRSAKeyPair(id, 2048)
+	require.NoError(t, err)
+
+	// Use it through a read-only Context.
+	cfg := testConfig(t)
+	cfg.ReadOnlySessions = true
+	ro, err := Configure(cfg)
+	require.NoError(t, err)
+	defer ro.Close()
+
+	found, err := ro.FindKeyPair(id, nil)
+	require.NoError(t, err)
+	require.NotNil(t, found)
+
+	digest := sha256.Sum256([]byte("read-only session signing"))
+	sig, err := found.Sign(rand.Reader, digest[:], crypto.SHA256)
+	require.NoError(t, err)
+	assert.NotEmpty(t, sig)
+}
+
+// TestIdleSessionsAreReused checks that sequential operations on a real token
+// are served by the session already open rather than by opening a new one per
+// call, so the number of sessions open on the token tracks concurrency rather
+// than the number of operations.
+func TestIdleSessionsAreReused(t *testing.T) {
+	ctx := testContext(t)
+
+	_, err := ctx.FindKeys(randomBytes(), nil)
+	require.NoError(t, err)
+	afterFirst := ctx.PoolStats()
+
+	for i := 0; i < 5; i++ {
+		_, err = ctx.FindKeys(randomBytes(), nil)
+		require.NoError(t, err)
+	}
+	afterMore := ctx.PoolStats()
+
+	assert.Equal(t, afterFirst.Active, afterMore.Active,
+		"sequential operations must reuse the open session, not open one each")
+	assert.Greater(t, afterMore.IdleReused, afterFirst.IdleReused,
+		"the reuse counter must have advanced")
 }

@@ -318,6 +318,19 @@ type Config struct {
 	// LoginNotSupported should be set to true for tokens that do not support logging in.
 	LoginNotSupported bool
 
+	// ReadOnlySessions, when true, opens every session without CKF_RW_SESSION,
+	// so crypto11 only ever holds read-only sessions on the token.
+	//
+	// This is for tokens that refuse a read/write session outright — some
+	// devices answer C_OpenSession with CKR_TOKEN_WRITE_PROTECTED — and for
+	// deployments that only ever sign, verify, encrypt or decrypt with keys
+	// provisioned elsewhere and would rather not hold write access at all.
+	//
+	// A read-only session cannot create or destroy objects, so key generation,
+	// key import and object deletion fail with CKR_SESSION_READ_ONLY while this
+	// is set. Operations on keys that already exist on the token are unaffected.
+	ReadOnlySessions bool
+
 	// UseGCMIVFromHSM should be set to true for tokens such as CloudHSM, which ignore the supplied IV for
 	// GCM mode and generate their own. In this case, the token will write the IV used into the CK_GCM_PARAMS.
 	// If UseGCMIVFromHSM is true, we will copy this IV and overwrite the 'nonce' slice passed to Seal and Open. It
@@ -533,7 +546,7 @@ func Configure(config *Config) (*Context, error) {
 
 	// Create a long-term session and log it in (if supported). This session won't be used by callers, instead it is
 	// used to keep a connection alive to the token to ensure object handles and the log in status remain accessible.
-	instance.persistentSession, err = instance.ctx.OpenSession(instance.slot, pkcs11.CKF_SERIAL_SESSION|pkcs11.CKF_RW_SESSION)
+	instance.persistentSession, err = instance.ctx.OpenSession(instance.slot, instance.sessionFlags())
 	if err != nil {
 		return nil, fmt.Errorf("failed to create long term session: %w", err)
 	}

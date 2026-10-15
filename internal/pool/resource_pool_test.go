@@ -238,7 +238,7 @@ func TestShrinking(t *testing.T) {
 		p.SetCapacity(3)
 		done <- true
 	}()
-	expected := `{"Capacity": 3, "Available": 0, "Active": 4, "InUse": 4, "MaxCapacity": 5, "WaitCount": 0, "WaitTime": 0, "IdleTimeout": 1000000000, "IdleClosed": 0}`
+	expected := `{"Capacity": 3, "Available": 0, "Active": 4, "InUse": 4, "MaxCapacity": 5, "WaitCount": 0, "WaitTime": 0, "IdleTimeout": 1000000000, "IdleClosed": 0, "IdleReused": 0}`
 	for i := 0; i < 10; i++ {
 		time.Sleep(10 * time.Millisecond)
 		stats := p.StatsJSON()
@@ -257,7 +257,7 @@ func TestShrinking(t *testing.T) {
 		p.Put(resources[i])
 	}
 	stats := p.StatsJSON()
-	expected = `{"Capacity": 3, "Available": 3, "Active": 3, "InUse": 0, "MaxCapacity": 5, "WaitCount": 0, "WaitTime": 0, "IdleTimeout": 1000000000, "IdleClosed": 0}`
+	expected = `{"Capacity": 3, "Available": 3, "Active": 3, "InUse": 0, "MaxCapacity": 5, "WaitCount": 0, "WaitTime": 0, "IdleTimeout": 1000000000, "IdleClosed": 0, "IdleReused": 0}`
 	if stats != expected {
 		t.Errorf(`expecting '%s', received '%s'`, expected, stats)
 	}
@@ -380,7 +380,7 @@ func TestClosing(t *testing.T) {
 	// Wait for goroutine to call Close
 	time.Sleep(10 * time.Millisecond)
 	stats := p.StatsJSON()
-	expected := `{"Capacity": 0, "Available": 0, "Active": 5, "InUse": 5, "MaxCapacity": 5, "WaitCount": 0, "WaitTime": 0, "IdleTimeout": 1000000000, "IdleClosed": 0}`
+	expected := `{"Capacity": 0, "Available": 0, "Active": 5, "InUse": 5, "MaxCapacity": 5, "WaitCount": 0, "WaitTime": 0, "IdleTimeout": 1000000000, "IdleClosed": 0, "IdleReused": 0}`
 	if stats != expected {
 		t.Errorf(`expecting '%s', received '%s'`, expected, stats)
 	}
@@ -400,7 +400,7 @@ func TestClosing(t *testing.T) {
 	}
 
 	stats = p.StatsJSON()
-	expected = `{"Capacity": 0, "Available": 0, "Active": 0, "InUse": 0, "MaxCapacity": 5, "WaitCount": 0, "WaitTime": 0, "IdleTimeout": 1000000000, "IdleClosed": 0}`
+	expected = `{"Capacity": 0, "Available": 0, "Active": 0, "InUse": 0, "MaxCapacity": 5, "WaitCount": 0, "WaitTime": 0, "IdleTimeout": 1000000000, "IdleClosed": 0, "IdleReused": 0}`
 	if stats != expected {
 		t.Errorf(`expecting '%s', received '%s'`, expected, stats)
 	}
@@ -554,7 +554,7 @@ func TestCreateFail(t *testing.T) {
 		t.Errorf("Expecting Failed, received %v", err)
 	}
 	stats := p.StatsJSON()
-	expected := `{"Capacity": 5, "Available": 5, "Active": 0, "InUse": 0, "MaxCapacity": 5, "WaitCount": 0, "WaitTime": 0, "IdleTimeout": 1000000000, "IdleClosed": 0}`
+	expected := `{"Capacity": 5, "Available": 5, "Active": 0, "InUse": 0, "MaxCapacity": 5, "WaitCount": 0, "WaitTime": 0, "IdleTimeout": 1000000000, "IdleClosed": 0, "IdleReused": 0}`
 	if stats != expected {
 		t.Errorf(`expecting '%s', received '%s'`, expected, stats)
 	}
@@ -633,5 +633,95 @@ func TestExpired(t *testing.T) {
 	want := "resource pool timed out"
 	if err == nil || err.Error() != want {
 		t.Errorf("got %v, want %s", err, want)
+	}
+}
+
+// TestIdleReuse checks that a request is served by an already-open resource
+// rather than by opening a new one. The channel is FIFO over a set of initially
+// empty entries, so without this the pool would open a resource per request
+// until it was full, even with idle resources queued behind the empty entries.
+func TestIdleReuse(t *testing.T) {
+	ctx := context.Background()
+	lastID.Set(0)
+	count.Set(0)
+	p := NewResourcePool(PoolFactory, 4, 4, time.Second, 0)
+	defer p.Close()
+
+	// Open one resource and hand it back, so the pool holds one open resource
+	// behind three empty entries.
+	first, err := p.Get(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p.Put(first)
+	if p.Active() != 1 {
+		t.Fatalf("p.Active(): %d, want 1", p.Active())
+	}
+
+	// The next request must reuse it. Without idle reuse the FIFO channel would
+	// hand out an empty entry and open a second resource.
+	second, err := p.Get(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second != first {
+		t.Errorf("Get returned a new resource; the idle one should have been reused")
+	}
+	if p.Active() != 1 {
+		t.Errorf("p.Active(): %d, want 1 (no new resource should have been opened)", p.Active())
+	}
+	if p.IdleReused() != 1 {
+		t.Errorf("p.IdleReused(): %d, want 1", p.IdleReused())
+	}
+	p.Put(second)
+
+	// Reuse must not lose capacity: the pool still holds four entries.
+	if p.Available() != 4 {
+		t.Errorf("p.Available(): %d, want 4", p.Available())
+	}
+}
+
+// TestIdleReuseKeepsCapacity checks that scanning past empty entries to find an
+// idle resource puts them all back, so a pool that has been used and drained
+// still reports its full capacity.
+func TestIdleReuseKeepsCapacity(t *testing.T) {
+	ctx := context.Background()
+	lastID.Set(0)
+	count.Set(0)
+	p := NewResourcePool(PoolFactory, 5, 5, time.Second, 0)
+	defer p.Close()
+
+	// Open all five, then return them, so every entry holds an open resource.
+	var resources [5]Resource
+	for i := 0; i < 5; i++ {
+		r, err := p.Get(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resources[i] = r
+	}
+	for i := 0; i < 5; i++ {
+		p.Put(resources[i])
+	}
+	if p.Active() != 5 || p.Available() != 5 {
+		t.Fatalf("p.Active(): %d, p.Available(): %d, want 5 and 5", p.Active(), p.Available())
+	}
+
+	// Take and return one repeatedly; capacity and the open count must not drift.
+	for i := 0; i < 10; i++ {
+		r, err := p.Get(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		p.Put(r)
+	}
+	if p.Active() != 5 {
+		t.Errorf("p.Active(): %d, want 5", p.Active())
+	}
+	if p.Available() != 5 {
+		t.Errorf("p.Available(): %d, want 5", p.Available())
+	}
+	if p.IdleReused() != 10 {
+		t.Errorf("p.IdleReused(): %d, want 10", p.IdleReused())
 	}
 }

@@ -48,6 +48,7 @@ type ResourcePool struct {
 	waitCount  AtomicInt64
 	waitTime   AtomicDuration
 	idleClosed AtomicInt64
+	idleReused AtomicInt64
 
 	capacity    AtomicInt64
 	idleTimeout AtomicDuration
@@ -107,7 +108,11 @@ func NewResourcePool(factory Factory, capacity, maxCap int, idleTimeout time.Dur
 				default:
 				}
 
-				r, err := rp.Get(ctx)
+				// Prefill exists to open capacity resources up front, so it
+				// must not be served by the idle-reuse path: reusing the one
+				// resource it just opened would leave the pool holding a
+				// single resource however large it was created.
+				r, err := rp.get(ctx, false)
 				if err != nil {
 					return
 				}
@@ -172,10 +177,13 @@ func (rp *ResourcePool) closeIdleResources() {
 // it will wait till the next resource becomes available or a timeout.
 // A timeout of 0 is an indefinite wait.
 func (rp *ResourcePool) Get(ctx context.Context) (resource Resource, err error) {
-	return rp.get(ctx)
+	return rp.get(ctx, true)
 }
 
-func (rp *ResourcePool) get(ctx context.Context) (resource Resource, err error) {
+// get takes a resource from the pool. When reuseIdle is set, an already-open
+// resource is preferred over opening a new one; prefill turns it off so that it
+// still opens the full complement of resources.
+func (rp *ResourcePool) get(ctx context.Context, reuseIdle bool) (resource Resource, err error) {
 	// If ctx has already expired, avoid racing with rp's resource channel.
 	select {
 	case <-ctx.Done():
@@ -201,6 +209,16 @@ func (rp *ResourcePool) get(ctx context.Context) (resource Resource, err error) 
 		return nil, ErrClosed
 	}
 
+	// The channel is FIFO and the pool is created full of empty entries, so a
+	// plain receive hands out the empty entries first: every request would open
+	// a fresh resource until the pool was full, even with idle resources queued
+	// behind them. Look for an already-open resource before falling back to the
+	// factory, so the number of resources open on the token tracks the
+	// concurrency actually in flight rather than the number of requests served.
+	if wrapper.resource == nil && reuseIdle {
+		wrapper = rp.takeIdle(wrapper)
+	}
+
 	// Unwrap
 	if wrapper.resource == nil {
 		wrapper.resource, err = rp.factory()
@@ -209,10 +227,60 @@ func (rp *ResourcePool) get(ctx context.Context) (resource Resource, err error) 
 			return nil, err
 		}
 		rp.active.Add(1)
+	} else {
+		// The resource was already open, whether it came straight off the
+		// channel or was found by takeIdle.
+		rp.idleReused.Add(1)
 	}
 	rp.available.Add(-1)
 	rp.inUse.Add(1)
 	return wrapper.resource, err
+}
+
+// takeIdle looks behind the empty entry just taken from the channel for an
+// already-open resource, and returns it in place of that entry. The empty
+// entries it passes over are put back, so the pool's capacity is unchanged and
+// no resource is lost. If no open resource is found, the entry it was given is
+// returned unchanged and the caller opens a new one.
+//
+// The scan is bounded by the channel's capacity and stops as soon as the
+// channel is empty, so it cannot spin: each iteration either takes an entry
+// that is not put back until the scan ends, or finds the channel empty.
+func (rp *ResourcePool) takeIdle(empty resourceWrapper) resourceWrapper {
+	var held []resourceWrapper
+	var idle resourceWrapper
+	found := false
+
+	for i := 0; i < cap(rp.resources); i++ {
+		var candidate resourceWrapper
+		var ok bool
+		select {
+		case candidate, ok = <-rp.resources:
+		default:
+			ok = false
+		}
+		if !ok {
+			break
+		}
+		if candidate.resource != nil {
+			idle = candidate
+			found = true
+			break
+		}
+		held = append(held, candidate)
+	}
+
+	// Return everything we passed over, and the empty entry we started with if
+	// an open resource took its place. The channel has room for all of them:
+	// we removed len(held) entries plus, when found, the idle one.
+	for _, w := range held {
+		rp.resources <- w
+	}
+	if found {
+		rp.resources <- empty
+		return idle
+	}
+	return empty
 }
 
 // Put will return a resource to the pool. For every successful Get,
@@ -314,7 +382,7 @@ func (rp *ResourcePool) SetIdleTimeout(idleTimeout time.Duration) {
 
 // StatsJSON returns the stats in JSON format.
 func (rp *ResourcePool) StatsJSON() string {
-	return fmt.Sprintf(`{"Capacity": %v, "Available": %v, "Active": %v, "InUse": %v, "MaxCapacity": %v, "WaitCount": %v, "WaitTime": %v, "IdleTimeout": %v, "IdleClosed": %v}`,
+	return fmt.Sprintf(`{"Capacity": %v, "Available": %v, "Active": %v, "InUse": %v, "MaxCapacity": %v, "WaitCount": %v, "WaitTime": %v, "IdleTimeout": %v, "IdleClosed": %v, "IdleReused": %v}`,
 		rp.Capacity(),
 		rp.Available(),
 		rp.Active(),
@@ -324,6 +392,7 @@ func (rp *ResourcePool) StatsJSON() string {
 		rp.WaitTime().Nanoseconds(),
 		rp.IdleTimeout().Nanoseconds(),
 		rp.IdleClosed(),
+		rp.IdleReused(),
 	)
 }
 
@@ -371,4 +440,10 @@ func (rp *ResourcePool) IdleTimeout() time.Duration {
 // IdleClosed returns the count of resources closed due to idle timeout.
 func (rp *ResourcePool) IdleClosed() int64 {
 	return rp.idleClosed.Get()
+}
+
+// IdleReused returns the count of times an already-open resource was handed out
+// in preference to opening a new one.
+func (rp *ResourcePool) IdleReused() int64 {
+	return rp.idleReused.Get()
 }

@@ -135,6 +135,9 @@ A minimal configuration file looks like this:
 - `TokenLabel` is the `CKA_LABEL` of the token you wish to use.
 - `Pin` is the password for the `CKU_USER` user.
 - `UseGCMIVFromHSM` generates the IV for GCM mechanism from the HSM
+- `ReadOnlySessions` opens every session without `CKF_RW_SESSION`, for tokens that refuse a
+  read/write session (`CKR_TOKEN_WRITE_PROTECTED`). Key generation, key import and object deletion
+  then fail with `CKR_SESSION_READ_ONLY`; use it only when the keys are provisioned elsewhere.
 
 A configuration file that contains a `Pin` is a credential: `ConfigureFromFile` refuses one that
 is readable by anyone but its owner (`chmod 600`; not checked on Windows). Better still, keep the
