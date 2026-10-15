@@ -163,6 +163,12 @@ type PoolStats struct {
 	// are reported for completeness.
 	IdleTimeout time.Duration
 	IdleClosed  int64
+
+	// IdleReused is the cumulative number of times an operation was served by a
+	// session that was already open rather than by opening a new one. It only
+	// ever grows. A high value against a low Active count is the pool doing its
+	// job: reusing idle sessions instead of opening one per request.
+	IdleReused int64
 }
 
 // PoolStats returns a snapshot of the state of the session pool, for metrics
@@ -188,12 +194,27 @@ func (c *Context) PoolStats() PoolStats {
 		WaitTime:    c.pool.WaitTime(),
 		IdleTimeout: c.pool.IdleTimeout(),
 		IdleClosed:  c.pool.IdleClosed(),
+		IdleReused:  c.pool.IdleReused(),
 	}
+}
+
+// sessionFlags returns the flags every session crypto11 opens is created with.
+//
+// CKF_SERIAL_SESSION is mandatory in PKCS#11 v2.0 and later, so it is always
+// set. CKF_RW_SESSION is added unless Config.ReadOnlySessions asks for
+// read-only sessions, which is what tokens that reject a read/write session
+// (CKR_TOKEN_WRITE_PROTECTED) require.
+func (c *Context) sessionFlags() uint {
+	flags := uint(pkcs11.CKF_SERIAL_SESSION)
+	if !c.cfg.ReadOnlySessions {
+		flags |= pkcs11.CKF_RW_SESSION
+	}
+	return flags
 }
 
 // resourcePoolFactoryFunc is called by the resource pool when a new session is needed.
 func (c *Context) resourcePoolFactoryFunc() (pool.Resource, error) {
-	session, err := c.ctx.OpenSession(c.slot, pkcs11.CKF_SERIAL_SESSION|pkcs11.CKF_RW_SESSION)
+	session, err := c.ctx.OpenSession(c.slot, c.sessionFlags())
 	if err != nil {
 		return nil, err
 	}

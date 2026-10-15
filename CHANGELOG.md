@@ -68,6 +68,21 @@ was replaced, the config file was renamed, and the API surface was hardened afte
   [@eriklupander](https://github.com/eriklupander)). It reads in-memory counters only: no PKCS#11
   call, no session taken, safe to call concurrently or on a closed `Context`. The returned
   `PoolStats` is a plain struct, so the vendored `internal/pool` types stay out of the public API.
+- `Config.ReadOnlySessions`, which opens every session — the persistent one and the pooled ones —
+  without `CKF_RW_SESSION`, for tokens that refuse a read/write session outright (some answer
+  `C_OpenSession` with `CKR_TOKEN_WRITE_PROTECTED`) and for deployments that only ever use keys
+  provisioned elsewhere ([#109](https://github.com/eclipse-keypont/crypto11/pull/109), contributed
+  by [@thuandb](https://github.com/thuandb)). A read-only session cannot create or destroy objects,
+  so key generation, key import and object deletion fail with `CKR_SESSION_READ_ONLY` while it is
+  set; signing, verification, encryption and decryption with existing keys are unaffected.
+- **Demand-driven session allocation**: the pool now hands out a session that is already open in
+  preference to opening a new one, so the number of sessions open on the token tracks the
+  concurrency actually in flight rather than the number of operations served
+  ([#142](https://github.com/eclipse-keypont/crypto11/issues/142), reported by
+  [@robinsandhu](https://github.com/robinsandhu)). `PoolStats` gains an `IdleReused` counter. The
+  session-recovery half of the same issue — a session the token has declared dead is closed and
+  replaced rather than returned to the pool — landed earlier in
+  [#144](https://github.com/eclipse-keypont/crypto11/pull/144).
 - `FindAllRSAKeyPairs`, the decryption-capable counterpart of `FindAllKeyPairs`: one call for every
   key pair on the token that can decrypt, returned as `SignerDecrypter`
   ([#112](https://github.com/eclipse-keypont/crypto11/issues/112)). The generic `FindKeyPair` family
