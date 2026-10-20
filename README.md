@@ -48,6 +48,29 @@ crypto11 is part of [Eclipse KeyPont](https://projects.eclipse.org/projects/tech
 *KeyPont* — "key" plus the French *pont* ("bridge") — reflects the project's goal: bridging Go
 applications to cryptographic keys held in HSMs and other PKCS#11-backed hardware.
 
+## How crypto11 fits in
+
+```mermaid
+%%{init: {"flowchart": {"nodeSpacing": 16, "rankSpacing": 32, "padding": 8}}}%%
+flowchart TB
+    APP["your Go application"]
+    GOSE(["gose<br/>JOSE · JWT · JWK · JWS · JWKS"])
+    C11(["crypto11<br/>crypto.Signer / crypto.Decrypter"])
+    P11(["pkcs11-go<br/>cryptoki + p11"])
+    DRV["vendor PKCS #11 driver"]
+    HSM{{"HSM / TPM · keys"}}
+
+    APP --> GOSE
+    APP --> C11
+    GOSE --> C11
+    C11 --> P11
+    P11 <-->|"PKCS #11 C API<br/>up to v3.2"| DRV
+    DRV <-->|"USB · network · TPM"| HSM
+
+    classDef main fill:#1f6feb,stroke:#1f6feb,color:#fff,font-weight:bold,font-size:16px
+    class C11 main
+```
+
 # Supported Algorithms
 
 ## Asymmetric keys
