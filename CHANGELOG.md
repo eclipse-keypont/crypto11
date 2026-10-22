@@ -3,6 +3,15 @@
 All notable changes to crypto11 are documented in this file. For the full commit-level history see
 [GitHub Releases](https://github.com/eclipse-keypont/crypto11/releases).
 
+## Unreleased
+
+### Changed
+
+- Build and test toolchain bumped from `go1.27.2` to `go1.27.3` (`toolchain` directive in
+  `go.mod`, `.go-version`, and the version noted in `CONTRIBUTING.md`). go1.27.3 is a patch
+  release that fixes the `crypto/x509` standard-library vulnerability `GO-2026-6809`
+  ("distrust compromised intermediate certificates") flagged by `govulncheck` on go1.27.2.
+
 ## v2.0.0 — pkcs11-go, PKCS#11 v3.2 and ML-KEM
 
 v2 is a breaking release (hence the `/v2` module path) driven by three changes: the PKCS#11 binding

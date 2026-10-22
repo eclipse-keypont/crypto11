@@ -31,12 +31,17 @@ Some topics we'd particularly like help with:
 
 ## Table of contents
 
+- [Table of contents](#table-of-contents)
 - [Provenance: signed commits, the ECA and the DCO](#provenance-signed-commits-the-eca-and-the-dco)
+  - [1. Cryptographically sign every commit — *who wrote this?*](#1-cryptographically-sign-every-commit--who-wrote-this)
+  - [2. Sign off every commit — *do you have the right to submit it?*](#2-sign-off-every-commit--do-you-have-the-right-to-submit-it)
+  - [3. Sign the Eclipse Contributor Agreement — *once, with the Foundation*](#3-sign-the-eclipse-contributor-agreement--once-with-the-foundation)
 - [Reporting a security vulnerability](#reporting-a-security-vulnerability)
 - [Reporting bugs and requesting features](#reporting-bugs-and-requesting-features)
 - [Development environment](#development-environment)
 - [Running the checks locally](#running-the-checks-locally)
 - [Testing against a token](#testing-against-a-token)
+  - [Local configuration](#local-configuration)
 - [Fuzzing](#fuzzing)
 - [Coding conventions](#coding-conventions)
 - [Commit messages](#commit-messages)
@@ -128,7 +133,7 @@ actually shorten the diagnosis are:
 
 ## Development environment
 
-- **Go** — the version in [`.go-version`](./.go-version) (currently 1.27.2). CI builds against it;
+- **Go** — the version in [`.go-version`](./.go-version) (currently 1.27.3). CI builds against it;
   older toolchains may work but aren't tested.
 - **A PKCS#11 token** — optional for a first build, required for meaningful test coverage. See
   [Testing against a token](#testing-against-a-token).

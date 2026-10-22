@@ -111,7 +111,7 @@ govulncheck:
 #   go install github.com/securego/gosec/v2/cmd/gosec@71577268350e1e0f2f1491de1ef53f1227b43c1f
 #
 # Pinned to gosec master (x/tools v0.52.0) instead of the v2.29.0 release:
-# v2.29.0 links x/tools v0.49.0, which cannot decode the go1.27.2 export data
+# v2.29.0 links x/tools v0.49.0, which cannot decode the go1.27.3 export data
 # (version 5 > maximum supported 4) and fails the scan. Move back to a tagged
 # release once one ships x/tools >= v0.50.0.
 GOSEC ?= gosec

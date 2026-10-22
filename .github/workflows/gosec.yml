@@ -39,7 +39,7 @@ jobs:
           cache: true
 
       # Pinned to gosec master (x/tools v0.52.0) instead of the v2.29.0 release:
-      # v2.29.0 links x/tools v0.49.0, which cannot decode the go1.27.2 export
+      # v2.29.0 links x/tools v0.49.0, which cannot decode the go1.27.3 export
       # data (version 5 > maximum supported 4) and fails the scan. Move back to a
       # tagged release once one ships x/tools >= v0.50.0.
       - name: Install gosec
