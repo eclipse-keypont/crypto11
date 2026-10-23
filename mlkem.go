@@ -32,6 +32,10 @@ type pkcs11MLKEMKeyPair struct {
 	paramSet     MLKEMParameterSet
 }
 
+type pkcs11MLKEMEncapsulatorKey struct {
+	pkcs11Object
+}
+
 // MLKEMSharedSecret wraps a PKCS#11 object handle for a KEM-derived shared secret key.
 // The object is created on the token by Encapsulate or Decapsulate.
 type MLKEMSharedSecret struct {
@@ -91,6 +95,9 @@ type MLKEMEncapsulator interface {
 
 // MLKEMDecapsulator is an ML-KEM private key capable of recovering a shared secret from a ciphertext.
 type MLKEMDecapsulator interface {
+	// Encapsulator returns the public key corresponding to this private key.
+	Encapsulator() Encapsulator
+
 	// Decapsulate recovers the shared secret from a ciphertext produced by the matching
 	// encapsulator, deriving a new key object on the token using sharedSecretAttrs as the template.
 	// Unless the template says otherwise, the derived key is sensitive, not extractable and
@@ -108,6 +115,74 @@ type MLKEMDecapsulator interface {
 type MLKEMKeyPair interface {
 	MLKEMEncapsulator
 	MLKEMDecapsulator
+}
+
+// Bytes returns the raw encoding of the ML-KEM public key.
+// The token must allow reading the public-key value.
+func (k *pkcs11MLKEMEncapsulatorKey) Bytes() ([]byte, error) {
+	var raw []byte
+	err := k.context.withSession(func(session *pkcs11Session) error {
+		attrs, err := session.ctx.GetAttributeValue(session.handle, k.handle,
+			[]*pkcs11.Attribute{pkcs11.NewAttribute(pkcs11.CKA_VALUE, nil)})
+		if err != nil {
+			return err
+		}
+		if len(attrs) == 0 || len(attrs[0].Value) == 0 {
+			// The token returned no value — typically because the key is
+			// sensitive / non-extractable.
+			return fmt.Errorf("encapsulator key is unavailable (key not extractable?)")
+		}
+		// Hand the caller its own copy and clear the binding's, which it has
+		// no way to reach; the documented pkcs11.Wipe on the returned slice
+		// would otherwise leave this second copy for the garbage collector.
+		raw = append([]byte(nil), attrs[0].Value...)
+		pkcs11.Wipe(attrs[0].Value)
+		return nil
+	})
+	return raw, err
+}
+
+// Encapsulate performs ML-KEM encapsulation with this public key using
+// PKCS#11 v3.2 C_EncapsulateKey. sharedSecretAttrs defines the derived key
+// (for example, an AES key with CKA_VALUE_LEN set to 32).
+//
+// The derived key remains on the token and is returned as a [SecretKey].
+func (k *pkcs11MLKEMEncapsulatorKey) Encapsulate(sharedSecretAttrs AttributeSet) ([]byte, *SecretKey, error) {
+	attr, ok := sharedSecretAttrs[pkcs11.CKA_KEY_TYPE]
+	if !ok {
+		return nil, nil, fmt.Errorf("sharedSecretAttrs missing CKA_KEY_TYPE")
+	}
+	keyType := pkcs11.BytesToULong(attr.Value)
+
+	cipher, ok := Ciphers[int(keyType)]
+	if !ok {
+		return nil, nil, fmt.Errorf("unsupported key type")
+	}
+
+	var ciphertext []byte
+	var ss *SecretKey
+	err := k.context.withSession(func(session *pkcs11Session) error {
+		mech := pkcs11.NewMechanism(pkcs11.CKM_ML_KEM, nil)
+		ct, ssHandle, err := session.ctx.EncapsulateKey(
+			session.handle, mech, k.handle, sharedSecretAttrs.ToSlice())
+		if err != nil {
+			return err
+		}
+		ciphertext = ct
+		ss = &SecretKey{
+			pkcs11Object: pkcs11Object{handle: ssHandle, context: k.context},
+			Cipher:       cipher,
+		}
+		return nil
+	})
+	return ciphertext, ss, err
+}
+
+// Encapsulator returns the public key of this ML-KEM key pair.
+func (k *pkcs11MLKEMKeyPair) Encapsulator() Encapsulator {
+	return &pkcs11MLKEMEncapsulatorKey{
+		pkcs11Object: pkcs11Object{context: k.context, handle: k.pubKeyHandle},
+	}
 }
 
 // Delete destroys both the private and public key objects on the token.

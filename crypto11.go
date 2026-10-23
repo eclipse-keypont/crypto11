@@ -265,6 +265,17 @@ type RSAPrivateKey interface {
 	KeyType() uint
 }
 
+// Encapsulator represents a KEM public key that can encapsulate a shared secret.
+type Encapsulator interface {
+	// Bytes returns the raw public-key encoding.
+	Bytes() (raw []byte, err error)
+
+	// Encapsulate generates a ciphertext and derives the shared secret as a key on the token,
+	// using sharedSecretAttrs as the key template. Send the ciphertext to the holder of the
+	// matching private key so they can derive the same shared secret.
+	Encapsulate(sharedSecretAttrs AttributeSet) (ciphertext []byte, sharedSecret *SecretKey, err error)
+}
+
 // findToken finds a token given exactly one of serial, label or slotNumber
 func (c *Context) findToken(slots []pkcs11.SlotID, serial, label string, slotNumber *int) (pkcs11.SlotID, *pkcs11.TokenInfo, error) {
 	for _, slot := range slots {

@@ -5,6 +5,10 @@
 package crypto11
 
 import (
+	"crypto/aes"
+	"crypto/cipher"
+	"crypto/mlkem"
+	"crypto/rand"
 	"testing"
 
 	pkcs11 "github.com/eclipse-keypont/pkcs11-go/cryptoki"
@@ -35,6 +39,8 @@ func TestMLKEM(t *testing.T) {
 	t.Run("Generate768", func(t *testing.T) { testMLKEMGenerate(t, ctx, MLKEM768) })
 	t.Run("Generate1024", func(t *testing.T) { testMLKEMGenerate(t, ctx, MLKEM1024) })
 	t.Run("RoundTrip", func(t *testing.T) { testMLKEMRoundTrip(t, ctx) })
+	t.Run("EncapsulatorBytesInterop", func(t *testing.T) { testMLKEMEncapsulatorBytesInterop(t, ctx) })
+	t.Run("EncapsulatorByAESGCM", func(t *testing.T) { testMLKEMEncapsulatorByAESGCM(t, ctx) })
 	t.Run("FindByID", func(t *testing.T) { testMLKEMFindByID(t, ctx) })
 	t.Run("FindByLabel", func(t *testing.T) { testMLKEMFindByLabel(t, ctx) })
 	t.Run("Delete", func(t *testing.T) { testMLKEMDelete(t, ctx) })
@@ -242,6 +248,91 @@ func testMLKEMRoundTrip(t *testing.T, ctx *Context) {
 
 	assert.Equal(t, encapBytes, decapBytes, "encapsulated and decapsulated shared secrets must match")
 	assert.Len(t, encapBytes, 32, "shared secret should be 32 bytes for AES-256 template")
+}
+
+// testMLKEMEncapsulatorBytesInterop checks that the exported public-key bytes
+// can be used by Go's ML-KEM implementation to encapsulate a secret that the
+// token can then decapsulate.
+func testMLKEMEncapsulatorBytesInterop(t *testing.T, ctx *Context) {
+	t.Helper()
+	id := randomBytes()
+	key, err := ctx.GenerateMLKEMKeyPair(id, MLKEM768)
+	require.NoError(t, err)
+	defer func() { _ = key.Delete() }()
+
+	ssTemplate := mlkemSharedSecretTemplate()
+
+	publicKey := key.Encapsulator()
+
+	// Export the public key and use it for local encapsulation.
+	publicKeyBytes, err := publicKey.Bytes()
+	require.NoError(t, err)
+
+	localPublicKey, err := mlkem.NewEncapsulationKey768(publicKeyBytes)
+	require.NoError(t, err)
+	encapBytes, ciphertext := localPublicKey.Encapsulate()
+
+	// The token must recover the same shared secret from the locally generated ciphertext.
+	decapSS, err := key.Decapsulate(ciphertext, ssTemplate)
+	require.NoError(t, err)
+	defer func() { _ = decapSS.Delete() }()
+
+	decapBytes, err := decapSS.Bytes()
+	require.NoError(t, err)
+
+	// Both sides must derive the same shared secret.
+	assert.Equal(t, encapBytes, decapBytes, "encapsulated and decapsulated shared secrets must match")
+	assert.Len(t, encapBytes, 32, "shared secret should be 32 bytes for AES-256 template")
+}
+
+// testMLKEMEncapsulatorByAESGCM checks that a secret encapsulated on the token
+// matches the secret recovered by decapsulation, without reading the
+// encapsulated key back from the token.
+func testMLKEMEncapsulatorByAESGCM(t *testing.T, ctx *Context) {
+	t.Helper()
+	id := randomBytes()
+	key, err := ctx.GenerateMLKEMKeyPair(id, MLKEM768)
+	require.NoError(t, err)
+	defer func() { _ = key.Delete() }()
+
+	ssTemplate := mlkemSharedSecretTemplate()
+	testBytes := randomBytes()
+
+	publicKey := key.Encapsulator()
+
+	// Encapsulate on the token and retain the derived key there.
+	ciphertext, encapSS, err := publicKey.Encapsulate(ssTemplate)
+	require.NoError(t, err)
+	defer func() { _ = encapSS.Delete() }()
+
+	// Decapsulate the ciphertext and export this key for local encryption.
+	decapSS, err := key.Decapsulate(ciphertext, ssTemplate)
+	require.NoError(t, err)
+	defer func() { _ = decapSS.Delete() }()
+
+	decapBytes, err := decapSS.Bytes()
+	require.NoError(t, err)
+
+	// Encrypt locally with the decapsulated key.
+	block, err := aes.NewCipher(decapBytes)
+	require.NoError(t, err)
+	deAead, err := cipher.NewGCM(block)
+	require.NoError(t, err)
+
+	nonce := make([]byte, deAead.NonceSize())
+	_, err = rand.Read(nonce)
+	require.NoError(t, err)
+
+	encryptedData := deAead.Seal([]byte{}, nonce, testBytes, nil)
+
+	// The token-held encapsulated key must decrypt the ciphertext.
+	enAead, err := encapSS.NewGCM()
+	require.NoError(t, err)
+	decryptedData, err := enAead.Open([]byte{}, nonce, encryptedData, nil)
+	require.NoError(t, err)
+
+	// The recovered plaintext must match the original.
+	assert.Equal(t, testBytes, decryptedData, "decrypted plaintext must match the original")
 }
 
 func testMLKEMFindByID(t *testing.T, ctx *Context) {
