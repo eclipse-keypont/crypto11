@@ -108,7 +108,7 @@ New files carry the same SPDX header the existing sources use:
 ```
 
 If your contribution pulls in a new third-party dependency, say so explicitly in the pull request:
-dependencies need a license review, an entry in [`NOTICES.md`](./NOTICES.md) (`make notices`) and a
+dependencies need a license review, an entry in [`NOTICE.md`](./NOTICE.md) (`make notices`) and a
 refreshed SBOM (`make sbom`).
 
 ## Reporting a security vulnerability
@@ -163,7 +163,7 @@ predictor of a green pull request:
 | `make lint` | `golangci-lint run ./...` against [`.golangci.yml`](./.golangci.yml) | `lint.yml` |
 | `make lint-fix` | the same, auto-fixing what can be fixed mechanically | — |
 | `make govulncheck` | reachability-aware vulnerability scan | `govulncheck.yml` |
-| `make notices` | regenerates [`NOTICES.md`](./NOTICES.md) | — |
+| `make notices` | regenerates [`NOTICE.md`](./NOTICE.md) | — |
 | `make sbom` | regenerates the CycloneDX SBOM | `release.yml` |
 
 CodeQL, native GitHub secret scanning, dependency review and the OpenSSF Scorecard gate also run

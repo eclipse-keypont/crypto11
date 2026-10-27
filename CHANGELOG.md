@@ -304,7 +304,7 @@ reporting or the Eclipse Foundation security team — and which versions receive
 - Repository moved from `github.com/ThalesGroup/crypto11` to `github.com/eclipse-keypont/crypto11`
   (Eclipse Foundation donation). SPDX license headers added, naming Thales Group and the Eclipse
   Foundation KeyPont project maintainers as copyright holders — `LICENSE` likewise — and
-  `NOTICES.md` generated from the dependency graph.
+  `NOTICE.md` generated from the dependency graph.
 - `go.mod` follows the two-directive policy adopted on `master` in
   [#137](https://github.com/eclipse-keypont/crypto11/issues/137): `go 1.25.0` is the minimum a
   consumer needs — lowered from `go 1.26.1` in v1.7.0-rc1, since a library's `go` directive is a

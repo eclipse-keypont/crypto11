@@ -195,7 +195,7 @@ A `Makefile` wraps the common developer commands:
 | `make test`                  | `go test ./...` (see [Testing Guidance](#testing-guidance) below for HSM-backed coverage) |
 | `make lint`                  | Runs `golangci-lint` (v2) against `.golangci.yml`, same checks as CI                      |
 | `make lint-fix`              | Runs `golangci-lint` with `--fix` for mechanically-fixable findings                       |
-| `make notices`               | Regenerates [`NOTICES.md`](./NOTICES.md) via `go-licenses`                                |
+| `make notices`               | Regenerates [`NOTICE.md`](./NOTICE.md) via `go-licenses`                                |
 | `make version`               | Prints the most recent git tag                                                            |
 | `make release VERSION=x.y.z` | Creates a signed `vx.y.z` tag and pushes it, triggering the release workflow              |
 
@@ -606,7 +606,7 @@ and scope.
 
 # Third-party notices
 
-[`NOTICES.md`](./NOTICES.md) lists all third-party dependency licenses and is auto-generated via `make notices` (requires [`go-licenses`](https://github.com/google/go-licenses)).
+[`NOTICE.md`](./NOTICE.md) lists all third-party dependency licenses and is auto-generated via `make notices` (requires [`go-licenses`](https://github.com/google/go-licenses)).
 
 # Vulnerability check
 
