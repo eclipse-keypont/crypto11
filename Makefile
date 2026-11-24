@@ -121,7 +121,7 @@ gosec:
 	$(GOSEC) ./...
 
 # ── Licenses ─────────────────────────────────────────────────────────────────
-# Regenerates NOTICES.md from the module graph, rendering go-licenses.tpl.
+# Regenerates NOTICE.md from the module graph, rendering go-licenses.tpl.
 #
 # Expected on every run: klog "W... contains non-Go code that can't be inspected
 # for further dependencies" warnings for pkcs11-go's cgo shim and PKCS#11
@@ -131,9 +131,10 @@ gosec:
 # silenced: go-licenses registers klog's --logtostderr/--stderrthreshold flags
 # but ignores them, and filtering stderr here would also hide real failures.
 #
-# Only non-test dependencies are listed — consumers never compile *_test.go, so
-# testify and its indirect deps are intentionally absent. Pass --include_tests
-# to change that.
+# Runtime dependencies are listed first. Test-only dependencies — testify and
+# its indirect deps, which consumers never compile — are listed in a separate
+# "Test-only dependencies" section, computed as the set difference between the
+# --include_tests report and the runtime report.
 #
 # Install go-licenses:
 #   go install github.com/google/go-licenses@latest
@@ -141,10 +142,15 @@ GO_LICENSES ?= go-licenses
 
 notices:
 	$(call require,$(GO_LICENSES),go install github.com/google/go-licenses@latest)
-	@{ $(GO_LICENSES) report ./... --ignore github.com/eclipse-keypont/crypto11 --template go-licenses.tpl > NOTICES.md.tmp && \
-	   printf '\n## Vendored source (in-tree)\n\nThe following code is copied directly into this repository and is not a Go module dependency, so it is not covered by the table above.\n\n| Path | Origin | License | License file |\n|------|--------|---------|--------------|\n| `internal/pool` | `github.com/thales-e-security/pool` (extracted from `vitess.io/vitess`) | Apache-2.0 | [internal/pool/LICENSE](internal/pool/LICENSE) |\n' >> NOTICES.md.tmp && \
-	   mv NOTICES.md.tmp NOTICES.md; } || { rm -f NOTICES.md.tmp; exit 1; }
-	@echo "NOTICES.md generated"
+	@{ $(GO_LICENSES) report ./... --ignore github.com/eclipse-keypont/crypto11 --template go-licenses.tpl > NOTICE.md.tmp && \
+	   $(GO_LICENSES) report ./... --include_tests --ignore github.com/eclipse-keypont/crypto11 --template go-licenses.tpl > NOTICE.md.all.tmp && \
+	   ( grep -vxF -f NOTICE.md.tmp NOTICE.md.all.tmp || true ) > NOTICE.md.test.tmp && \
+	   cat NOTICE.md.tmp > NOTICE.md.new && \
+	   { [ ! -s NOTICE.md.test.tmp ] || { printf '\n## Test-only dependencies\n\nThe following modules are used only by the test suite. They are not compiled into the released artifact and are therefore not part of what consumers link against.\n\n| Package | License | License URL |\n|---------|---------|-------------|\n' >> NOTICE.md.new && cat NOTICE.md.test.tmp >> NOTICE.md.new; }; } && \
+	   printf '\n## Vendored source (in-tree)\n\nThe following code is copied directly into this repository and is not a Go module dependency, so it is not covered by the table above.\n\n| Path | Origin | License | License file |\n|------|--------|---------|--------------|\n| `internal/pool` | `github.com/thales-e-security/pool` (extracted from `vitess.io/vitess`) | Apache-2.0 | [internal/pool/LICENSE](internal/pool/LICENSE) |\n' >> NOTICE.md.new && \
+	   mv NOTICE.md.new NOTICE.md; } || { rm -f NOTICE.md.tmp NOTICE.md.all.tmp NOTICE.md.test.tmp NOTICE.md.new; exit 1; }
+	@rm -f NOTICE.md.tmp NOTICE.md.all.tmp NOTICE.md.test.tmp
+	@echo "NOTICE.md generated"
 
 # ── SBOM ─────────────────────────────────────────────────────────────────────
 # Generates a CycloneDX 1.6 SBOM with the exact same flags as the release

@@ -14,8 +14,11 @@ demo/demo
 # local override files of any kind, e.g. crypto11.config.json.local
 *.local
 
-# scratch file `make notices` writes before atomically replacing NOTICES.md
-NOTICES.md.tmp
+# scratch files `make notices` writes before atomically replacing NOTICE.md
+NOTICE.md.tmp
+NOTICE.md.all.tmp
+NOTICE.md.test.tmp
+NOTICE.md.new
 
 # locally generated SBOMs and release artifacts (`make sbom`, release assets)
 *.cdx.json
