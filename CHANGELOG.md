@@ -10,6 +10,9 @@ was replaced, the config file was renamed, and the API surface was hardened afte
 
 ### Breaking changes
 
+- `MLKEMDecapsulator` now requires `Encapsulator() Encapsulator`, which exposes the matching
+  public key for encapsulation. External implementations and mocks of `MLKEMDecapsulator`
+  (including those implementing `MLKEMKeyPair`) must add this method.
 - `ConfigureFromFile` refuses a configuration file that contains a `Pin` and is readable by its
   group or by others (mode `& 0077 != 0`; not checked on Windows). A `chmod 600` on the file, or
   moving the PIN out of it (`Config.PinFunc`, an environment variable), is the fix.
@@ -42,7 +45,8 @@ was replaced, the config file was renamed, and the API surface was hardened afte
 - **PKCS#11 v3.2 support**, via the new pkcs11-go binding.
 - **Post-quantum ML-KEM** key generation, encapsulation and decapsulation (ML-KEM 512/768/1024,
   FIPS 203 / `CKM_ML_KEM`) through new `MLKEMEncapsulator` / `MLKEMDecapsulator` interfaces
-  (`mlkem.go`).
+  (`mlkem.go`). `MLKEMKeyPair.Encapsulator()` exposes the matching public key through the new
+  `Encapsulator` interface (`crypto11.go`).
 - `MLKEMDeriveKey`, a KMAC-based key derivation helper for turning ML-KEM shared secrets into
   usable keys.
 - **Ed25519** key generation and signing (`GenerateEd25519KeyPair`, `…WithLabel`,
