@@ -3,6 +3,108 @@
 All notable changes to crypto11 are documented in this file. For the full commit-level history see
 [GitHub Releases](https://github.com/eclipse-keypont/crypto11/releases).
 
+## Unreleased
+
+### Security
+
+- When the Context logs in, the secret-key, private-key and key-pair finders now match only
+  private objects (`CKA_PRIVATE = true`), unless the caller's attribute set names
+  `CKA_PRIVATE` itself. Only a logged-in user can create a private object, whereas many tokens
+  let any session create public ones, so a public object carrying the requested `CKA_ID` or
+  `CKA_LABEL` could be returned in place of the real key when that key was absent, not
+  visible, or listed after it.
+- A finder that returns a single key (`FindKey`, `FindKeyWithAttributes`, `FindKeyPair`,
+  `FindKeyPairWithAttributes`, `FindPrivateKey`, `FindPrivateKeyWithAttributes`,
+  `FindRSAPrivateKey`, `FindRSAKeyPair`, `FindMLKEMKeyPair`) now reports an error when more
+  than one key matches, instead of returning whichever the token listed first.
+- A session the pool opens is now checked before it is handed out: the slot must still hold the
+  token the Context was configured for, and the session must be logged in. When the login went
+  away underneath the Context (a `C_Logout` elsewhere in the process, an HSM-side timeout, a
+  reconnect), operations went on in sessions that were no longer logged in, and after a token
+  was swapped they ran on the new token. They now fail with an error saying the login is lost
+  or the token changed. crypto11 does not keep the PIN, so it does not log in again: close the
+  Context and configure a new one. `CKR_USER_NOT_LOGGED_IN` now retires the session it came
+  from, so the next operation runs that check.
+- `SecretKey.NewHMAC` no longer takes a pooled session, with the Context's read lock, the
+  moment it is called. It held both until `Sum`, and an HMAC that was dropped before `Sum`, as
+  when a caller rejects a message before computing its MAC, never gave them back: the pool
+  drained one session at a time, and `Close` waited forever. The session is now taken by the
+  first `Write` or `Sum` and given back by `Sum`, and an HMAC dropped in between gives it back
+  when the garbage collector finalizes it.
+- An HMAC from `NewHMAC` now fails closed when data is written after `Sum`. The token has
+  ended the operation by then, so the data cannot be added; `Write` returned an error, but a
+  caller that ignored it got the MAC of the earlier data alone from the next `Sum`. That
+  `Write` now leaves the hash dead until `Reset`, and `Sum` panics.
+- The verify-after-sign check on RSA signatures now also covers keys found without their public
+  half, through `FindPrivateKey`, `FindRSAPrivateKey` and their variants. Those keys carried no
+  public key, so their signatures were returned unchecked, and a signature from a faulty CRT
+  computation reveals the private key. The public key is now read from the private key object
+  itself (`CKA_MODULUS` and `CKA_PUBLIC_EXPONENT`, or `CKA_PUBLIC_KEY_INFO`). Only a key whose
+  token exposes none of these is still not checked.
+- A pooled session is now retired when a token operation fails with an error that did not come
+  from the token. When pkcs11-go gives up on a call, for instance because the output would
+  exceed its 64 MiB limit, the token is never told and the operation stays active; the session
+  went back to the pool, and the next caller to draw it failed with `CKR_OPERATION_ACTIVE`, or
+  lost the session objects on it when that error retired it. An oversize AES-GCM `Seal` or
+  `Open`, or CBC `CryptBlocks`, was enough.
+- ML-KEM `Decapsulate` now refuses a ciphertext whose length is not the one FIPS 203 fixes for
+  the key's parameter set (768, 1088 or 1568 bytes) before it reaches the token. Some modules,
+  SoftHSMv2 among them, answer a wrong length with `CKR_GENERAL_ERROR`, which retired the pooled
+  session and destroyed the session objects other callers had on it. `Encapsulate` checks the
+  length the token returns the same way when the parameter set is known.
+- Keys and certificates created as session objects (`CKA_TOKEN = false`) are now created on the
+  Context's persistent session, which lasts as long as the Context, one caller at a time. A
+  session object lives only as long as the session that created it, and it was created on a
+  pooled session, which is closed whenever an error retires it, possibly on another caller's
+  operation; the object then vanished. ML-KEM shared secrets, which callers keep only for one
+  operation, are still created on pooled sessions.
+- `Configure` no longer accepts any PIN for a token that another Context in the process has
+  already logged in. Login state belongs to the application, so `C_Login` answers
+  `CKR_USER_ALREADY_LOGGED_IN` without checking the PIN, and crypto11 took that as success: a
+  Context with a wrong PIN got the first one's access. crypto11 now keeps a keyed digest (an
+  HMAC under a per-process random key) of the PIN it logged each token in with, and refuses a
+  later Context that presents a different one. A login made outside crypto11 is still accepted
+  as before, since there is nothing to compare with.
+- `Configure` now fails when the configured token label or serial number matches more than one
+  token, instead of using whichever slot is listed first. Labels are chosen by whoever
+  initialises a token, so another token initialised with the same label in a lower slot was
+  silently used in place of the intended one.
+- `Close` no longer deadlocks with an operation started while it waits. Operations held a
+  read lock that `Close` took for writing, and a waiting writer blocks new readers, so a request
+  that held a session (an open CBC block mode, say) and then started another operation waited
+  on `Close`, which waited on it. Once `Close` has begun, new operations now fail at once with
+  "context is closed", and `Close` also wakes operations waiting for a pooled session. The
+  `PoolWaitTimeout` documentation now warns that a caller holding one session while waiting for
+  another can wait for ever with the default of zero.
+- `Configure` now refuses a relative `Config.Path`. It used to resolve one against the working
+  directory, which defeated pkcs11-go's own refusal: a library planted in the working directory
+  under that name would be loaded, and its code run, in the process.
+- `ConfigureFromFile` now refuses a config file owned by anyone but the current user or root
+  (not checked on Windows). The mode checks said nothing about a file someone else owns, who can
+  change its mode and rewrite it, and the file names the library `Configure` loads.
+- ECDSA and Ed25519 signatures are now verified against the public key before they are
+  returned, as RSA signatures already were, since a signature computed with a fault can reveal
+  the private key; for deterministic Ed25519, two signatures of one message are enough. A key
+  found without its public half is checked against the `CKA_PUBLIC_KEY_INFO` of its private key
+  object when the token sets it.
+- AES-GCM `Seal` now refuses output that is not exactly the plaintext plus the tag, and `Open`
+  plaintext that is not exactly the ciphertext less the tag (or, where the token appends its own
+  IV, longer than the ciphertext); a ciphertext shorter than the tag is refused without asking
+  the token. A short `Seal` result would have handed the caller a truncated tag.
+- `MLKEMDeriveKey` now refuses a shared secret that is not the 32 bytes FIPS 203 defines. It
+  accepted any length, and an empty secret, from a token that did not return the value for
+  instance, derived a fixed key anyone could compute.
+
+### Changed
+
+- `Config.Path` must be absolute.
+- The finders no longer return a secret or private key with `CKA_PRIVATE = false` on a Context
+  that logs in. Keys crypto11 generates are private by default. To find one that is not, pass
+  `CKA_PRIVATE = false` in the attribute set of a `WithAttributes` finder.
+- `NewHMAC` no longer reports a failure to start the signing operation on the token, such as
+  a key that may not sign; the first `Write` returns it (or `Sum` panics with it). `Reset` no
+  longer takes a session, so it cannot fail.
+
 ## v2.0.0 — pkcs11-go, PKCS#11 v3.2 and ML-KEM
 
 v2 is a breaking release (hence the `/v2` module path) driven by three changes: the PKCS#11 binding
