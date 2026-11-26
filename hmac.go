@@ -141,7 +141,9 @@ var errInvalidMACLength = errors.New("invalid MAC length")
 //
 // Reset finishes any operation in progress and forgets the result; the next
 // Write or Sum starts a new operation. After Sum() is called no new data may
-// be added.
+// be added: unlike crypto/hmac, the token has ended the operation, so a Write
+// of data after Sum returns an error and leaves the hash dead until Reset, and
+// Sum then panics rather than return a MAC that does not cover that data.
 //
 // Failure handling: the returned hash.Hash cannot report errors through Sum,
 // whose signature is fixed by the interface. If the underlying HSM operation
@@ -232,6 +234,12 @@ func finalizeHMAC(hi *hmacImplementation) {
 func (hi *hmacImplementation) Write(p []byte) (n int, err error) {
 	if hi.result != nil {
 		if len(p) > 0 {
+			// Sum ended the operation on the token, so p cannot be added. A
+			// caller that ignores this error must not get the MAC of what came
+			// before p from the next Sum as if it covered p: the hash is dead
+			// until Reset.
+			hi.result = nil
+			hi.dead = true
 			err = errHmacClosed
 		}
 		return

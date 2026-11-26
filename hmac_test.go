@@ -226,14 +226,15 @@ func testHmac(t *testing.T, ctx *Context, keyLabel string, keytype int, mech int
 			r2 := h1.Sum([]byte{})
 			require.Equal(t, r1, r2)
 
-			// Can't add more after Sum()
-			_, err = h1.Write(input)
-			require.Equal(t, errHmacClosed, err)
-
 			// 0-length is special
 			n, err = h1.Write([]byte{})
 			require.NoError(t, err)
 			require.Zero(t, n)
+
+			// Can't add more after Sum(), and trying leaves the hash dead.
+			_, err = h1.Write(input)
+			require.Equal(t, errHmacClosed, err)
+			require.Panics(t, func() { h1.Sum(nil) })
 		})
 		t.Run("Reset", func(t *testing.T) {
 
@@ -463,4 +464,36 @@ func TestAbandonedHMACReleasesSession(t *testing.T) {
 	_, err = h.Write([]byte("message"))
 	require.NoError(t, err)
 	require.Len(t, h.Sum(nil), 32)
+}
+
+// TestHMACWriteAfterSumFailsClosed checks that data written after Sum, which
+// the finished token operation cannot take, makes the next Sum panic instead of
+// returning the MAC of the earlier data as if it covered the new data too.
+func TestHMACWriteAfterSumFailsClosed(t *testing.T) {
+	ctx := testContext(t)
+	skipIfMechUnsupported(t, ctx, pkcs11.CKM_SHA256_HMAC)
+	key, found, err := findKeyOrCreate(ctx, "hmac0", pkcs11.CKK_SHA256_HMAC, 256)
+	require.NoError(t, err)
+	if !found {
+		defer key.Delete()
+	}
+
+	h, err := key.NewHMAC(pkcs11.CKM_SHA256_HMAC, 0)
+	require.NoError(t, err)
+	_, err = h.Write([]byte("header"))
+	require.NoError(t, err)
+	header := h.Sum(nil)
+	require.Equal(t, header, h.Sum(nil), "Sum without new data repeats the MAC")
+	_, err = h.Write(nil)
+	require.NoError(t, err, "an empty Write after Sum adds nothing")
+	require.Equal(t, header, h.Sum(nil))
+
+	_, err = h.Write([]byte("body"))
+	require.ErrorIs(t, err, errHmacClosed)
+	require.Panics(t, func() { h.Sum(nil) }, "Sum returned the MAC of the header alone")
+
+	h.Reset()
+	_, err = h.Write([]byte("header"))
+	require.NoError(t, err)
+	require.Equal(t, header, h.Sum(nil), "Reset makes the hash usable again")
 }
