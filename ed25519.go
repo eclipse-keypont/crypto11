@@ -201,5 +201,23 @@ func (s *pkcs11PrivateKeyEd25519) Sign(_ io.Reader, message []byte, opts crypto.
 	if len(signature) != ed25519.SignatureSize {
 		return nil, fmt.Errorf("token returned a %d-byte signature, want %d", len(signature), ed25519.SignatureSize)
 	}
+	if err := checkEd25519Signature(s.verificationKey(), message, signature); err != nil {
+		return nil, err
+	}
 	return signature, nil
+}
+
+// checkEd25519Signature verifies a signature the token returned before it is released, as
+// checkRSASignature does for RSA. Ed25519 is deterministic, so two signatures of one message that
+// differ because of a fault reveal the private key. A key whose public half is unknown is not
+// checked.
+func checkEd25519Signature(pub crypto.PublicKey, message, signature []byte) error {
+	epub, ok := pub.(ed25519.PublicKey)
+	if !ok || len(epub) != ed25519.PublicKeySize {
+		return nil
+	}
+	if !ed25519.Verify(epub, message, signature) {
+		return errSignatureCheck
+	}
+	return nil
 }

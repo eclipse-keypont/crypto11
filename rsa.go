@@ -32,31 +32,34 @@ var errUnsupportedRSAOptions = errors.New("unsupported RSA option value")
 // pkcs11PrivateKeyRSA contains a reference to a loaded PKCS#11 RSA private key object.
 type pkcs11PrivateKeyRSA struct {
 	pkcs11PrivateKey
-
-	// checkKey is the public key Sign verifies signatures with when the key was found without its
-	// public half (pubKey is nil): read from the private key object itself by rsaCheckKey. It is
-	// nil when the token exposes neither.
-	checkKey *rsa.PublicKey
 }
 
 // rsaCheckKey determines the public key of an RSA private key found without its public half, for
 // the check Sign makes on every signature: the private key object's own CKA_MODULUS and
 // CKA_PUBLIC_EXPONENT, which are not sensitive, or failing that its CKA_PUBLIC_KEY_INFO. It
 // returns nil when the token exposes neither; that key's signatures cannot be checked.
-func rsaCheckKey(session *pkcs11Session, priv pkcs11.ObjectHandle) *rsa.PublicKey {
+func rsaCheckKey(session *pkcs11Session, priv pkcs11.ObjectHandle) crypto.PublicKey {
 	if pub, err := exportRSAPublicKey(session, priv); err == nil {
-		if rpub, ok := pub.(*rsa.PublicKey); ok {
-			return rpub
-		}
+		return pub
 	}
-	if info := readAttributes(session, priv, pkcs11.CKA_PUBLIC_KEY_INFO)[0]; len(info) > 0 {
-		if pub, err := x509.ParsePKIXPublicKey(info); err == nil {
-			if rpub, ok := pub.(*rsa.PublicKey); ok {
-				return rpub
-			}
-		}
+	if pub, ok := publicKeyFromInfo(session, priv).(*rsa.PublicKey); ok {
+		return pub
 	}
 	return nil
+}
+
+// publicKeyFromInfo returns the public key a private key object carries in CKA_PUBLIC_KEY_INFO
+// (PKCS#11 v3.0), or nil when it carries none that crypto/x509 can parse.
+func publicKeyFromInfo(session *pkcs11Session, priv pkcs11.ObjectHandle) crypto.PublicKey {
+	info := readAttributes(session, priv, pkcs11.CKA_PUBLIC_KEY_INFO)[0]
+	if len(info) == 0 {
+		return nil
+	}
+	pub, err := x509.ParsePKIXPublicKey(info)
+	if err != nil {
+		return nil
+	}
+	return pub
 }
 
 // Export the public key corresponding to a private RSA key.
@@ -212,7 +215,8 @@ func (c *Context) makeRSAPrivateKey(session *pkcs11Session, privHandle *pkcs11.O
 
 	switch keyType {
 	case pkcs11.CKK_RSA:
-		result := &pkcs11PrivateKeyRSA{pkcs11PrivateKey: resultPkcs11PrivateKey, checkKey: rsaCheckKey(session, *privHandle)}
+		resultPkcs11PrivateKey.checkKey = rsaCheckKey(session, *privHandle)
+		result := &pkcs11PrivateKeyRSA{pkcs11PrivateKey: resultPkcs11PrivateKey}
 		return result, nil
 
 	default:
@@ -719,11 +723,7 @@ func (priv *pkcs11PrivateKeyRSA) Sign(_ io.Reader, digest []byte, opts crypto.Si
 	if err != nil {
 		return nil, err
 	}
-	check := priv.pubKey
-	if check == nil && priv.checkKey != nil {
-		check = priv.checkKey
-	}
-	if err := checkRSASignature(check, digest, signature, opts); err != nil {
+	if err := checkRSASignature(priv.verificationKey(), digest, signature, opts); err != nil {
 		return nil, err
 	}
 	return signature, nil

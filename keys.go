@@ -630,10 +630,12 @@ func (c *Context) makePrivateKey(session *pkcs11Session, privHandle *pkcs11.Obje
 		return result, nil
 
 	case pkcs11.CKK_RSA:
-		result := &pkcs11PrivateKeyRSA{pkcs11PrivateKey: resultPkcs11PrivateKey, checkKey: rsaCheckKey(session, *privHandle)}
+		resultPkcs11PrivateKey.checkKey = rsaCheckKey(session, *privHandle)
+		result := &pkcs11PrivateKeyRSA{pkcs11PrivateKey: resultPkcs11PrivateKey}
 		return result, nil
 
 	case pkcs11.CKK_ECDSA:
+		resultPkcs11PrivateKey.checkKey = publicKeyFromInfo(session, *privHandle)
 		result := &pkcs11PrivateKeyECDSA{pkcs11PrivateKey: resultPkcs11PrivateKey}
 		return result, nil
 
@@ -641,6 +643,7 @@ func (c *Context) makePrivateKey(session *pkcs11Session, privHandle *pkcs11.Obje
 		if err := checkEd25519PrivateKey(session, *privHandle); err != nil {
 			return nil, err
 		}
+		resultPkcs11PrivateKey.checkKey = publicKeyFromInfo(session, *privHandle)
 		result := &pkcs11PrivateKeyEd25519{pkcs11PrivateKey: resultPkcs11PrivateKey}
 		return result, nil
 

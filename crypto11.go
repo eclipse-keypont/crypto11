@@ -164,6 +164,20 @@ type pkcs11PrivateKey struct {
 	// pubKey is an exported copy of the public key. We pre-export the key material because crypto.Signer.Public
 	// doesn't allow us to return errors.
 	pubKey crypto.PublicKey
+
+	// checkKey is the public key a signature is verified with before it is returned, for a key
+	// found without its public half (pubKey nil): read from the private key object itself. It is
+	// nil when the token exposes none.
+	checkKey crypto.PublicKey
+}
+
+// verificationKey returns the public key Sign checks signatures against: the key pair's public
+// half, or the one read from the private key object, or nil.
+func (k *pkcs11PrivateKey) verificationKey() crypto.PublicKey {
+	if k.pubKey != nil {
+		return k.pubKey
+	}
+	return k.checkKey
 }
 
 // Delete implements Signer.Delete.
