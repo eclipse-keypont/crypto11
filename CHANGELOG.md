@@ -104,6 +104,9 @@ All notable changes to crypto11 are documented in this file. For the full commit
 - `NewHMAC` no longer reports a failure to start the signing operation on the token, such as
   a key that may not sign; the first `Write` returns it (or `Sum` panics with it). `Reset` no
   longer takes a session, so it cannot fail.
+- Build and test toolchain bumped from `go1.27.3` to `go1.27.4` (`toolchain` directive in
+  `go.mod`, `.go-version`, and the version noted in `CONTRIBUTING.md`). go1.27.4 fixes
+  `GO-2026-6859` in `net/http`, which `govulncheck` flagged on go1.27.3.
 
 ## v2.0.0 — pkcs11-go, PKCS#11 v3.2 and ML-KEM
 
