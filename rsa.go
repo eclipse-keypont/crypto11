@@ -32,6 +32,31 @@ var errUnsupportedRSAOptions = errors.New("unsupported RSA option value")
 // pkcs11PrivateKeyRSA contains a reference to a loaded PKCS#11 RSA private key object.
 type pkcs11PrivateKeyRSA struct {
 	pkcs11PrivateKey
+
+	// checkKey is the public key Sign verifies signatures with when the key was found without its
+	// public half (pubKey is nil): read from the private key object itself by rsaCheckKey. It is
+	// nil when the token exposes neither.
+	checkKey *rsa.PublicKey
+}
+
+// rsaCheckKey determines the public key of an RSA private key found without its public half, for
+// the check Sign makes on every signature: the private key object's own CKA_MODULUS and
+// CKA_PUBLIC_EXPONENT, which are not sensitive, or failing that its CKA_PUBLIC_KEY_INFO. It
+// returns nil when the token exposes neither; that key's signatures cannot be checked.
+func rsaCheckKey(session *pkcs11Session, priv pkcs11.ObjectHandle) *rsa.PublicKey {
+	if pub, err := exportRSAPublicKey(session, priv); err == nil {
+		if rpub, ok := pub.(*rsa.PublicKey); ok {
+			return rpub
+		}
+	}
+	if info := readAttributes(session, priv, pkcs11.CKA_PUBLIC_KEY_INFO)[0]; len(info) > 0 {
+		if pub, err := x509.ParsePKIXPublicKey(info); err == nil {
+			if rpub, ok := pub.(*rsa.PublicKey); ok {
+				return rpub
+			}
+		}
+	}
+	return nil
 }
 
 // Export the public key corresponding to a private RSA key.
@@ -187,7 +212,7 @@ func (c *Context) makeRSAPrivateKey(session *pkcs11Session, privHandle *pkcs11.O
 
 	switch keyType {
 	case pkcs11.CKK_RSA:
-		result := &pkcs11PrivateKeyRSA{pkcs11PrivateKey: resultPkcs11PrivateKey}
+		result := &pkcs11PrivateKeyRSA{pkcs11PrivateKey: resultPkcs11PrivateKey, checkKey: rsaCheckKey(session, *privHandle)}
 		return result, nil
 
 	default:
@@ -694,7 +719,11 @@ func (priv *pkcs11PrivateKeyRSA) Sign(_ io.Reader, digest []byte, opts crypto.Si
 	if err != nil {
 		return nil, err
 	}
-	if err := checkRSASignature(priv.pubKey, digest, signature, opts); err != nil {
+	check := priv.pubKey
+	if check == nil && priv.checkKey != nil {
+		check = priv.checkKey
+	}
+	if err := checkRSASignature(check, digest, signature, opts); err != nil {
 		return nil, err
 	}
 	return signature, nil
@@ -705,9 +734,10 @@ var errRSASignatureCheck = errors.New("crypto11: RSA signature from the token do
 
 // checkRSASignature verifies a signature the token returned before it is released. An RSA-CRT
 // signature computed with a fault, in the token's hardware or software, reveals the private key to
-// anyone who holds it and the public key, so one that does not verify is never returned. A key
-// found without its public half, or one shorter than the 1024 bits crypto/rsa will verify with,
-// is not checked.
+// anyone who holds it and the public key, so one that does not verify is never returned. The
+// public key is the key pair's public half, or for a private key found alone the one rsaCheckKey
+// read from it. Only a key whose token exposes no public key at all, or one shorter than the 1024
+// bits crypto/rsa will verify with, is not checked.
 func checkRSASignature(pub crypto.PublicKey, digest, signature []byte, opts crypto.SignerOpts) error {
 	rpub, ok := pub.(*rsa.PublicKey)
 	if !ok || rpub == nil || rpub.N.BitLen() < 1024 {
