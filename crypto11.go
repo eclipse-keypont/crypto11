@@ -92,6 +92,7 @@
 package crypto11
 
 import (
+	"context"
 	"crypto"
 	"encoding/json"
 	"errors"
@@ -203,11 +204,22 @@ type Context struct {
 	// closeOnce makes Close idempotent.
 	closeOnce sync.Once
 
-	// ops is held for reading by every operation for as long as it holds a
-	// session out of the pool — getSession to putSession — and for writing by
-	// Close. Close therefore waits for operations in flight, and no operation
-	// can start between Close deciding to tear down and the teardown.
-	ops sync.RWMutex
+	// activeOps counts the operations holding a session, from beginOp in
+	// getSession to endOp in putSession, so that Close can wait for them.
+	// closing, under opsMu, is set by Close before it waits: from then on
+	// beginOp fails at once. A sync.RWMutex did this job before, but a waiting
+	// writer blocks new readers, so an operation started by a goroutine that
+	// already held a session (a CBC block mode and then an HMAC) deadlocked
+	// against a pending Close.
+	opsMu     sync.Mutex
+	closing   bool
+	activeOps sync.WaitGroup
+
+	// closeCtx is cancelled by Close, to wake operations waiting for a pooled
+	// session. One that holds a session already would otherwise wait for
+	// another for ever, and Close with it.
+	closeCtx    context.Context
+	cancelClose context.CancelFunc
 
 	ctx moduleCtx
 	cfg *Config
@@ -381,6 +393,11 @@ type Config struct {
 	UserType int
 
 	// Maximum time to wait for a session from the sessions pool. Zero means wait indefinitely.
+	//
+	// A caller that holds a session while it waits for another, such as a CBC block mode that
+	// is still open while an HMAC is written to, can wait for ever once every session is held
+	// that way: with zero, nothing ends that wait but Close. Set a timeout when requests use
+	// more than one key operation at a time.
 	PoolWaitTimeout time.Duration
 
 	// LoginNotSupported should be set to true for tokens that do not support logging in.
@@ -581,6 +598,7 @@ func Configure(config *Config) (*Context, error) {
 		cfg: config,
 		ctx: modCtx,
 	}
+	instance.closeCtx, instance.cancelClose = context.WithCancel(context.Background())
 
 	// Everything acquired from here on is released again if Configure fails
 	// part-way. Dropping the module reference alone is not enough: when another
@@ -780,9 +798,15 @@ func (c *Context) Close() error {
 	// pool and trip moduleCtx.Close's refcount panic.
 	var err error
 	c.closeOnce.Do(func() {
-		// Wait for every operation that holds a session, and keep new ones out.
-		c.ops.Lock()
-		defer c.ops.Unlock()
+		// Keep new operations out, wake those waiting for a pooled session, and
+		// wait for every operation that holds a session.
+		c.opsMu.Lock()
+		c.closing = true
+		c.opsMu.Unlock()
+		if c.cancelClose != nil {
+			c.cancelClose()
+		}
+		c.activeOps.Wait()
 
 		c.closed.Set(true)
 

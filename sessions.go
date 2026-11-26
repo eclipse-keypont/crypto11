@@ -45,7 +45,7 @@ func (c *Context) withSession(f func(session *pkcs11Session) error) (err error) 
 // caller: returning it would make every operation that happens to draw it fail
 // the same way, long after the fault that killed it.
 func (c *Context) putSession(session *pkcs11Session, err error) {
-	defer c.ops.RUnlock()
+	defer c.endOp()
 	if sessionFatal(err) {
 		session.Close()
 		// A nil resource tells the pool to open a fresh session in its place.
@@ -133,50 +133,70 @@ func (c *Context) withObjectSession(templates []AttributeSet, f func(session *pk
 	return c.withSession(f)
 }
 
-// withPersistentSession runs f on the Context's persistent session, holding the Context's read
-// lock, as getSession does, and persistentMu, since a session must not be used concurrently.
+// withPersistentSession runs f on the Context's persistent session, counted as an operation in
+// flight, as getSession does, and under persistentMu, since a session must not be used
+// concurrently.
 func (c *Context) withPersistentSession(f func(session *pkcs11Session) error) error {
-	c.ops.RLock()
-	defer c.ops.RUnlock()
-	if c.closed.Get() {
-		return errors.New("context is closed")
+	if err := c.beginOp(); err != nil {
+		return err
 	}
+	defer c.endOp()
 	c.persistentMu.Lock()
 	defer c.persistentMu.Unlock()
 	return f(&pkcs11Session{c.ctx.Ctx, c.persistentSession})
 }
 
+// errContextClosing is returned to an operation that starts, or waits for a pooled session, once
+// Close has begun. We don't use errClosed to ensure our tests identify functions that aren't
+// checking for closure correctly.
+var errContextClosing = errors.New("context is closed")
+
+// beginOp counts an operation in flight, so that Close waits for it, unless Close has begun, in
+// which case it fails at once rather than waiting behind Close.
+func (c *Context) beginOp() error {
+	c.opsMu.Lock()
+	defer c.opsMu.Unlock()
+	if c.closing || c.closed.Get() {
+		return errContextClosing
+	}
+	c.activeOps.Add(1)
+	return nil
+}
+
+// endOp ends an operation counted by beginOp.
+func (c *Context) endOp() {
+	c.activeOps.Done()
+}
+
 // getSession retrieves a session from the pool, respecting the timeout defined in the Context config.
 // Callers are responsible for handing this session back through putSession.
 //
-// The session comes with the Context's read lock held: from here until putSession, Close cannot
-// run. That is what makes "is the Context still open?" and "take a session" one step rather than
-// two — a check-then-act that Close could otherwise slip between.
+// The session comes counted as an operation in flight (beginOp): from here until putSession,
+// Close waits. That is what makes "is the Context still open?" and "take a session" one step
+// rather than two — a check-then-act that Close could otherwise slip between. Once Close has
+// begun, getSession fails at once, and a wait for a pooled session is cut short.
 func (c *Context) getSession() (*pkcs11Session, error) {
-	c.ops.RLock()
-	if c.closed.Get() {
-		c.ops.RUnlock()
-		// We don't use errClosed to ensure our tests identify functions that aren't checking for closure
-		// correctly.
-		return nil, errors.New("context is closed")
+	if err := c.beginOp(); err != nil {
+		return nil, err
 	}
 
-	ctx := context.Background()
-
+	ctx := c.closeCtx
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	if c.cfg.PoolWaitTimeout > 0 {
 		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(context.Background(), c.cfg.PoolWaitTimeout)
+		ctx, cancel = context.WithTimeout(ctx, c.cfg.PoolWaitTimeout)
 		defer cancel()
 	}
 
 	resource, err := c.pool.Get(ctx)
-	if errors.Is(err, pool.ErrClosed) {
-		// Our Context must have been closed, return a nicer error.
-		c.ops.RUnlock()
-		return nil, errors.New("context is closed")
-	}
 	if err != nil {
-		c.ops.RUnlock()
+		c.endOp()
+		if errors.Is(err, pool.ErrClosed) || (c.closeCtx != nil && c.closeCtx.Err() != nil) {
+			// Our Context is closing, return a nicer error.
+			return nil, errContextClosing
+		}
 		return nil, err
 	}
 
