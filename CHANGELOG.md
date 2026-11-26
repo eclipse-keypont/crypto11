@@ -107,6 +107,11 @@ All notable changes to crypto11 are documented in this file. For the full commit
 - Build and test toolchain bumped from `go1.27.3` to `go1.27.4` (`toolchain` directive in
   `go.mod`, `.go-version`, and the version noted in `CONTRIBUTING.md`). go1.27.4 fixes
   `GO-2026-6859` in `net/http`, which `govulncheck` flagged on go1.27.3.
+- `github.com/eclipse-keypont/pkcs11-go` bumped from `v1.2.0` to `v1.3.0`, which carries the
+  round-2 fixes this release relies on: an operation the binding gives up on is ended with
+  `C_SessionCancel`, module-reported counts and lengths are bounded, and a NULL function-list
+  entry answers `CKR_FUNCTION_NOT_SUPPORTED`. Exported additions there (`ErrOutputTooLarge`,
+  `ErrOperationActive`) let a caller tell those failure modes apart.
 
 ## v2.0.0 — pkcs11-go, PKCS#11 v3.2 and ML-KEM
 

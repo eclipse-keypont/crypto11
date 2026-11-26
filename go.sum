@@ -1,5 +1,5 @@
-github.com/eclipse-keypont/pkcs11-go v1.2.0 h1:nwqBhiRMMSmKO3C4CQt10Ys0/InRFwOVcIbc1aIIwLs=
-github.com/eclipse-keypont/pkcs11-go v1.2.0/go.mod h1:G+u7RZavqPEtmVg/kyTunnlSBm0r18sDiQuWsr3vbg4=
+github.com/eclipse-keypont/pkcs11-go v1.3.0 h1:HHVEmGxUX3yd9MUUNAy1xfnVzZ7jI3KFjSQsSSm26Mw=
+github.com/eclipse-keypont/pkcs11-go v1.3.0/go.mod h1:xbuDgfoyeiIHrwG4QC35D7PteURkLF1buzJ/+lYYagw=
 github.com/stretchr/testify v1.12.1 h1:EuwCh5fleGS7H32xRwO3wRGT7DxrDhLAT6FF8MpWDWE=
 github.com/stretchr/testify v1.12.1/go.mod h1:MDEgiDPPsNp5cuIrHPPCyornHKgEVbtFUmoNlxoYthg=
 go.yaml.in/yaml/v3 v3.0.5 h1:N6y/pJk8buWs9NY5ERU2HSMfm+IuD/OtfdAnq6kESPw=

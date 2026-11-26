@@ -5,7 +5,7 @@ go 1.25.0
 toolchain go1.27.4
 
 require (
-	github.com/eclipse-keypont/pkcs11-go v1.2.0
+	github.com/eclipse-keypont/pkcs11-go v1.3.0
 	github.com/stretchr/testify v1.12.1
 )
 
