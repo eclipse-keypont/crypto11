@@ -740,8 +740,10 @@ func castDown(orig uint) int {
 // and calls Configure. The configuration file should be a JSON representation
 // of a Config object.
 //
-// A file whose Pin is set is refused unless it is readable by its owner alone
-// (no group or other permission bits; not checked on Windows). Keeping the PIN
+// The file must be owned by the current user or root, and writable by its owner
+// alone, since it names the library Configure loads. A file whose Pin is set is
+// also refused unless it is readable by its owner alone (no group or other
+// permission bits). None of this is checked on Windows. Keeping the PIN
 // out of the file altogether — Configure with a PinFunc, or a Pin taken from a
 // secret store — is the better arrangement.
 func ConfigureFromFile(configLocation string) (*Context, error) {
@@ -781,6 +783,9 @@ func loadConfigFromFile(configLocation string) (*Config, error) {
 		info, err := file.Stat()
 		if err != nil {
 			return nil, fmt.Errorf("could not stat config file: %w", err)
+		}
+		if err := checkConfigFileOwner(info); err != nil {
+			return nil, fmt.Errorf("config file %s is %w; whoever owns it can rewrite it", configLocation, err)
 		}
 		mode := info.Mode().Perm()
 		if mode&0o022 != 0 {

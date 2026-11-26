@@ -24,3 +24,21 @@ func TestConfigureRefusesRelativeModulePath(t *testing.T) {
 		require.ErrorContains(t, err, "must be absolute", relative)
 	}
 }
+
+// TestConfigFileOwnedByAnotherUserRefused checks that ConfigureFromFile refuses a config file
+// owned by another user, whatever its mode: its owner can rewrite it to name another library.
+func TestConfigFileOwnedByAnotherUserRefused(t *testing.T) {
+	if os.Geteuid() != 0 {
+		t.Skip("giving a file to another user needs root")
+	}
+	path := filepath.Join(t.TempDir(), "crypto11.config.json")
+	require.NoError(t, os.WriteFile(path, []byte(`{"Path": "/nonexistent/lib.so", "TokenLabel": "any"}`), 0o600))
+	require.NoError(t, os.Chown(path, 4242, 4242))
+
+	_, err := loadConfigFromFile(path)
+	require.ErrorContains(t, err, "owned by uid 4242")
+
+	require.NoError(t, os.Chown(path, 0, 0))
+	_, err = loadConfigFromFile(path)
+	require.NoError(t, err, "a file owned by root is accepted")
+}
