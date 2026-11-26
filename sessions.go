@@ -71,6 +71,9 @@ func sessionFatal(err error) bool {
 		pkcs11.CKR_DEVICE_REMOVED,
 		pkcs11.CKR_TOKEN_NOT_PRESENT,
 		pkcs11.CKR_GENERAL_ERROR,
+		// The login went away underneath the Context. Replacing the session runs
+		// checkNewSession, which reports it as errLoginLost.
+		pkcs11.CKR_USER_NOT_LOGGED_IN,
 		// A stuck multi-part operation: C_*Init keeps failing on this session
 		// until it is closed, and nothing we can call from here unsticks it.
 		pkcs11.CKR_OPERATION_ACTIVE:
@@ -212,11 +215,53 @@ func (c *Context) sessionFlags() uint {
 	return flags
 }
 
-// resourcePoolFactoryFunc is called by the resource pool when a new session is needed.
+// errLoginLost is returned when a session the pool opens is not logged in, although the Context
+// logged in when it was configured: the login went away underneath it, through a C_Logout
+// elsewhere in the process, a login timeout on the HSM, or a reconnect. crypto11 does not keep the
+// PIN, so it cannot log in again; close the Context and configure a new one.
+var errLoginLost = errors.New("crypto11: the token is no longer logged in; close the Context and configure a new one")
+
+// errTokenChanged is returned when the slot no longer holds the token the Context was configured
+// for, as after a token was removed and another inserted.
+var errTokenChanged = errors.New("crypto11: the slot no longer holds the token the Context was configured for")
+
+// resourcePoolFactoryFunc is called by the resource pool when a new session is needed. The new
+// session is checked (checkNewSession) before the pool hands it out.
 func (c *Context) resourcePoolFactoryFunc() (pool.Resource, error) {
 	session, err := c.ctx.OpenSession(c.slot, c.sessionFlags())
 	if err != nil {
 		return nil, err
 	}
+	if err := c.checkNewSession(session); err != nil {
+		_ = c.ctx.CloseSession(session)
+		return nil, err
+	}
 	return &pkcs11Session{c.ctx.Ctx, session}, nil
+}
+
+// checkNewSession checks a session the pool has just opened: the slot must still hold the token
+// the Context was configured for, and, unless the Context does not log in, the session must be
+// logged in. Login state is shared by every session of the application, so a new session that is
+// not logged in means the login is gone, and the finders would otherwise go on searching only the
+// token's public objects. The pool keeps its sessions, so this runs when one is replaced, after a
+// session error such as CKR_USER_NOT_LOGGED_IN or CKR_DEVICE_REMOVED, not on every operation.
+func (c *Context) checkNewSession(session pkcs11.SessionHandle) error {
+	token, err := c.ctx.GetTokenInfo(c.slot)
+	if err != nil {
+		return err
+	}
+	if token.SerialNumber != c.token.SerialNumber || token.Label != c.token.Label {
+		return errTokenChanged
+	}
+	if c.cfg.LoginNotSupported {
+		return nil
+	}
+	info, err := c.ctx.GetSessionInfo(session)
+	if err != nil {
+		return err
+	}
+	if info.State == pkcs11.CKS_RO_PUBLIC_SESSION || info.State == pkcs11.CKS_RW_PUBLIC_SESSION {
+		return errLoginLost
+	}
+	return nil
 }
