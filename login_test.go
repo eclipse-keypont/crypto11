@@ -51,3 +51,34 @@ func TestTokenChangedIsReported(t *testing.T) {
 	_, err := ctx.resourcePoolFactoryFunc()
 	require.ErrorIs(t, err, errTokenChanged)
 }
+
+// TestWrongPINRefusedWhileLoggedIn checks that a second Context on a token this process has
+// already logged in is refused when it presents a different PIN, which C_Login itself cannot
+// tell, and accepted with the right one.
+func TestWrongPINRefusedWhileLoggedIn(t *testing.T) {
+	first := testConfig(t)
+	if first.LoginNotSupported || first.Pin == "" {
+		t.Skip("needs a token that is logged in with a configured PIN")
+	}
+	pin := first.Pin
+	ctx, err := Configure(first)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = ctx.Close() })
+
+	for name, configure := range map[string]func(*Config){
+		"wrong PIN":     func(c *Config) { c.Pin = pin + "-wrong" },
+		"wrong PinFunc": func(c *Config) { c.Pin = ""; c.PinFunc = func() ([]byte, error) { return []byte(pin + "-wrong"), nil } },
+	} {
+		cfg := testConfig(t)
+		configure(cfg)
+		other, err := Configure(cfg)
+		if err == nil {
+			_ = other.Close()
+		}
+		require.ErrorIs(t, err, errLoginPINMismatch, name)
+	}
+
+	again, err := Configure(testConfig(t))
+	require.NoError(t, err, "the right PIN must still be accepted")
+	require.NoError(t, again.Close())
+}

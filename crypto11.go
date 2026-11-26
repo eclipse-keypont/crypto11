@@ -494,6 +494,7 @@ func (mc moduleCtx) Close() error {
 		_ = mc.Finalize()
 		mc.Destroy()
 		delete(moduleReferences, mc.path)
+		forgetLogins(mc.path)
 		return nil
 	}
 	// Decrement reference count.
@@ -619,16 +620,10 @@ func Configure(config *Config) (*Context, error) {
 		} else {
 			pin = []byte(instance.cfg.Pin)
 		}
-		err = instance.ctx.Login(instance.persistentSession, userType, pin)
-		pkcs11.Wipe(pin)
-		if err != nil {
-
-			var pErr pkcs11.Error
-			isP11Error := errors.As(err, &pErr)
-
-			if !isP11Error || pErr != pkcs11.CKR_USER_ALREADY_LOGGED_IN {
-				return nil, fmt.Errorf("failed to log into long term session: %w", err)
-			}
+		// login wipes the PIN, and accepts CKR_USER_ALREADY_LOGGED_IN only for the PIN this
+		// process logged the token in with.
+		if err = instance.login(userType, pin); err != nil {
+			return nil, fmt.Errorf("failed to log into long term session: %w", err)
 		}
 	}
 
