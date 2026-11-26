@@ -271,6 +271,12 @@ func (c *Context) makeKeyPair(session *pkcs11Session, privHandle *pkcs11.ObjectH
 		result.pubKey = pub
 		return result, certificate, nil
 
+	case pkcs11.CKK_ML_DSA:
+		result, err := makeMLDSAKeyPair(session, resultPkcs11PrivateKey, pubHandle, pub)
+		if err != nil {
+			return nil, nil, err
+		}
+		return result, certificate, nil
 	default:
 		return nil, nil, fmt.Errorf("%w: %X", errUnsupportedKeyType, keyType)
 	}

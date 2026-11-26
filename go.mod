@@ -10,3 +10,7 @@ require (
 )
 
 require go.yaml.in/yaml/v3 v3.0.5 // indirect
+
+// Note: This can be removed once https://github.com/eclipse-keypont/pkcs11-go/pull/52
+// is merged
+replace github.com/eclipse-keypont/pkcs11-go => github.com/maraino/pkcs11-go v0.0.0-20261126041401-b314e06a91ca
