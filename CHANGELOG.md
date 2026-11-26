@@ -49,6 +49,9 @@ was replaced, the config file was renamed, and the API surface was hardened afte
   `Encapsulator` interface (`crypto11.go`).
 - `MLKEMDeriveKey`, a KMAC-based key derivation helper for turning ML-KEM shared secrets into
   usable keys.
+- `MLKEMSharedSecret.AsSecretKey()`, which wraps the token-resident shared secret as a
+  `SecretKey` for supported on-token cryptographic operations without exporting it, including
+  when the key is sensitive or non-extractable.
 - **Ed25519** key generation and signing (`GenerateEd25519KeyPair`, `…WithLabel`,
   `…WithAttributes`), over PKCS#11 v3.0's `CKM_EC_EDWARDS_KEY_PAIR_GEN` and `CKM_EDDSA`
   (`ed25519.go`). Keys are returned as `Signer`, found again by the `FindKeyPair` and
