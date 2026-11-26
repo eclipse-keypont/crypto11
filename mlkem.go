@@ -77,6 +77,40 @@ func (s *MLKEMSharedSecret) Bytes() ([]byte, error) {
 	return raw, err
 }
 
+// AsSecretKey returns a [SecretKey] wrapper around the same token object.
+// It does not copy the key or change its attributes, so the key can be used
+// for supported token operations even when it is sensitive or non-extractable.
+// It returns an error if the key type is not supported.
+func (s *MLKEMSharedSecret) AsSecretKey() (*SecretKey, error) {
+	var key *SecretKey
+	err := s.context.withSession(func(session *pkcs11Session) error {
+		attrs, err := session.ctx.GetAttributeValue(session.handle, s.handle,
+			[]*pkcs11.Attribute{pkcs11.NewAttribute(pkcs11.CKA_KEY_TYPE, 0)})
+		if err != nil {
+			return err
+		}
+
+		if len(attrs) == 0 || len(attrs[0].Value) == 0 {
+			return fmt.Errorf("key type attribute is unavailable")
+		}
+		keyType := pkcs11.BytesToULong(attrs[0].Value)
+
+		cipher, ok := Ciphers[int(keyType)]
+		if !ok {
+			return fmt.Errorf("unsupported key type")
+		}
+
+		key = &SecretKey{
+			pkcs11Object: pkcs11Object{handle: s.handle, context: s.context},
+			Cipher:       cipher,
+		}
+
+		return nil
+	})
+
+	return key, err
+}
+
 // MLKEMEncapsulator is an ML-KEM public key capable of encapsulating a shared secret.
 type MLKEMEncapsulator interface {
 	// Encapsulate generates a fresh shared secret, encapsulates it with the public key, and

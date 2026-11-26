@@ -231,17 +231,56 @@ func testMLKEMNonExtractableSecret(t *testing.T, ctx *Context) {
 	require.NoError(t, err)
 	defer func() { _ = key.Delete() }()
 
+	publicKey := key.Encapsulator()
+
 	ssTemplate := mlkemSharedSecretTemplate()
 	require.NoError(t, ssTemplate.Set(pkcs11.CKA_EXTRACTABLE, false))
 	require.NoError(t, ssTemplate.Set(pkcs11.CKA_SENSITIVE, true))
 
-	_, ss, err := key.Encapsulate(ssTemplate)
+	// Export the public key and use it for local encapsulation.
+	publicKeyBytes, err := publicKey.Bytes()
 	require.NoError(t, err)
-	defer func() { _ = ss.Delete() }()
 
-	raw, err := ss.Bytes()
+	localPublicKey, err := mlkem.NewEncapsulationKey768(publicKeyBytes)
+	require.NoError(t, err)
+	encapBytes, ciphertext := localPublicKey.Encapsulate()
+
+	decapSS, err := key.Decapsulate(ciphertext, ssTemplate)
+	require.NoError(t, err)
+	defer func() { _ = decapSS.Delete() }()
+
+	// Attempting to get the raw bytes of the non-extractable shared secret must fail.
+	raw, err := decapSS.Bytes()
 	require.Error(t, err)
 	require.Empty(t, raw)
+
+	// Use the shared secret as a SecretKey for cryptographic operations.
+	secretKey, err := decapSS.AsSecretKey()
+	require.NoError(t, err)
+	require.NotNil(t, secretKey)
+
+	// Use AES-GCM for authenticated encryption with the shared secret.
+	deAead, err := secretKey.NewGCM()
+	require.NoError(t, err)
+	nonceSize := deAead.NonceSize()
+
+	block, err := aes.NewCipher(encapBytes)
+	require.NoError(t, err)
+	enAead, err := cipher.NewGCMWithNonceSize(block, nonceSize)
+	require.NoError(t, err)
+
+	nonce := make([]byte, nonceSize)
+	_, err = rand.Read(nonce)
+	require.NoError(t, err)
+
+	testBytes := randomBytes()
+	encryptedData := enAead.Seal([]byte{}, nonce, testBytes, nil)
+
+	decryptedData, err := deAead.Open([]byte{}, nonce, encryptedData, nil)
+	require.NoError(t, err)
+
+	// The recovered plaintext must match the original.
+	assert.Equal(t, testBytes, decryptedData, "decrypted plaintext must match the original")
 }
 
 func testMLKEMGenerate(t *testing.T, ctx *Context, paramSet MLKEMParameterSet) {
