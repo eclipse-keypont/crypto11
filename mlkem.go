@@ -212,6 +212,10 @@ func encapsulateMLKEM(context *Context, pubKeyHandle pkcs11.ObjectHandle, shared
 		if err != nil {
 			return err
 		}
+		if err := k.checkMLKEMCiphertext(ct); err != nil {
+			_ = session.ctx.DestroyObject(session.handle, ssHandle)
+			return err
+		}
 		ciphertext = ct
 		ss = &MLKEMSharedSecret{pkcs11Object{handle: ssHandle, context: context}}
 		return nil
@@ -220,8 +224,14 @@ func encapsulateMLKEM(context *Context, pubKeyHandle pkcs11.ObjectHandle, shared
 }
 
 // Decapsulate performs ML-KEM decapsulation using the private key (PKCS#11 v3.2 C_DecapsulateKey).
-// sharedSecretAttrs should match the template used during encapsulation.
+// sharedSecretAttrs should match the template used during encapsulation. A ciphertext whose length
+// is not the one the key's parameter set fixes is refused before it reaches the token, where some
+// modules answer it with CKR_GENERAL_ERROR, which costs the pooled session and any session
+// objects on it.
 func (k *pkcs11MLKEMKeyPair) Decapsulate(ciphertext []byte, sharedSecretAttrs AttributeSet) (*MLKEMSharedSecret, error) {
+	if err := k.checkMLKEMCiphertext(ciphertext); err != nil {
+		return nil, err
+	}
 	var ss *MLKEMSharedSecret
 	err := k.context.withSession(func(session *pkcs11Session) error {
 		mech := pkcs11.NewMechanism(pkcs11.CKM_ML_KEM, nil)
@@ -276,6 +286,33 @@ func (c *Context) GenerateMLKEMKeyPairWithLabel(id, label []byte, paramSet MLKEM
 	}
 	private := public.Copy()
 	return c.GenerateMLKEMKeyPairWithAttributes(public, private, paramSet)
+}
+
+// errMLKEMCiphertextLength is returned for an ML-KEM ciphertext whose length is not the one
+// FIPS 203 fixes for the key's parameter set.
+var errMLKEMCiphertextLength = errors.New("crypto11: ML-KEM ciphertext has the wrong length for the key's parameter set")
+
+// mlkemCiphertextSize returns the ciphertext length FIPS 203 fixes for parameter set p, and
+// false for a parameter set it does not define.
+func mlkemCiphertextSize(p MLKEMParameterSet) (int, bool) {
+	switch p {
+	case MLKEM512:
+		return 768, true
+	case MLKEM768:
+		return 1088, true
+	case MLKEM1024:
+		return 1568, true
+	}
+	return 0, false
+}
+
+// checkMLKEMCiphertext checks that ciphertext has the length the key's parameter set fixes. A key
+// whose parameter set is unknown is left to the token.
+func (k *pkcs11MLKEMKeyPair) checkMLKEMCiphertext(ciphertext []byte) error {
+	if size, ok := mlkemCiphertextSize(k.paramSet); ok && len(ciphertext) != size {
+		return fmt.Errorf("%w: %d bytes, want %d", errMLKEMCiphertextLength, len(ciphertext), size)
+	}
+	return nil
 }
 
 // validMLKEMParameterSet reports whether p is one of the three FIPS 203 levels.
