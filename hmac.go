@@ -255,7 +255,7 @@ func (hi *hmacImplementation) Write(p []byte) (n int, err error) {
 			return
 		}
 	}
-	if err = hi.session.ctx.SignUpdate(hi.session.handle, p); err != nil {
+	if err = operationError(hi.session.ctx.SignUpdate(hi.session.handle, p)); err != nil {
 		// The operation is dead. Release the session now, because Sum (which normally
 		// performs cleanup) will not be reached.
 		hi.fail(err)
@@ -296,12 +296,12 @@ func (hi *hmacImplementation) finish() ([]byte, error) {
 	if hi.updates == 0 {
 		// http://docs.oasis-open.org/pkcs11/pkcs11-base/v2.40/os/pkcs11-base-v2.40-os.html#_Toc322855304
 		// We must ensure that C_SignUpdate is called _at least once_.
-		if err := hi.session.ctx.SignUpdate(hi.session.handle, []byte{}); err != nil {
+		if err := operationError(hi.session.ctx.SignUpdate(hi.session.handle, []byte{})); err != nil {
 			hi.fail(err)
 			return nil, err
 		}
 	}
-	result, err := hi.session.ctx.SignFinal(hi.session.handle)
+	result, err := opResult(hi.session.ctx.SignFinal(hi.session.handle))
 	if err != nil {
 		hi.fail(err)
 		return nil, err

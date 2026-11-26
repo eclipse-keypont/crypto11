@@ -61,7 +61,7 @@ func (c *Context) dsaGeneric(key pkcs11.ObjectHandle, mechanism uint, digest []b
 		if err = c.ctx.SignInit(session.handle, mech, key); err != nil {
 			return err
 		}
-		sigBytes, err = c.ctx.Sign(session.handle, digest)
+		sigBytes, err = opResult(c.ctx.Sign(session.handle, digest))
 		return err
 	})
 	if err != nil {

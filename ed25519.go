@@ -189,7 +189,7 @@ func (s *pkcs11PrivateKeyEd25519) Sign(_ io.Reader, message []byte, opts crypto.
 		if err := session.ctx.SignInit(session.handle, mech, s.handle); err != nil {
 			return fmt.Errorf("initialize Ed25519 signing: %w", err)
 		}
-		signature, err = session.ctx.Sign(session.handle, message)
+		signature, err = opResult(session.ctx.Sign(session.handle, message))
 		if err != nil {
 			return fmt.Errorf("sign Ed25519 message: %w", err)
 		}

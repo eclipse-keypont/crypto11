@@ -154,9 +154,9 @@ func (bmc *blockModeCloser) CryptBlocks(dst, src []byte) {
 	var err error
 	switch bmc.mode {
 	case modeDecrypt:
-		result, err = bmc.session.ctx.DecryptUpdate(bmc.session.handle, src)
+		result, err = opResult(bmc.session.ctx.DecryptUpdate(bmc.session.handle, src))
 	case modeEncrypt:
-		result, err = bmc.session.ctx.EncryptUpdate(bmc.session.handle, src)
+		result, err = opResult(bmc.session.ctx.EncryptUpdate(bmc.session.handle, src))
 	}
 	if err != nil {
 		// The operation is dead; nothing will reach Close for this block mode
@@ -200,9 +200,9 @@ func (bmc *blockModeCloser) close() error {
 	var err error
 	switch bmc.mode {
 	case modeDecrypt:
-		result, err = bmc.session.ctx.DecryptFinal(bmc.session.handle)
+		result, err = opResult(bmc.session.ctx.DecryptFinal(bmc.session.handle))
 	case modeEncrypt:
-		result, err = bmc.session.ctx.EncryptFinal(bmc.session.handle)
+		result, err = opResult(bmc.session.ctx.EncryptFinal(bmc.session.handle))
 	}
 	bmc.session = nil
 	bmc.cleanup(err)

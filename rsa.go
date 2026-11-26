@@ -541,7 +541,7 @@ func decryptPKCS1v15(session *pkcs11Session, key *pkcs11PrivateKeyRSA, ciphertex
 	if err := session.ctx.DecryptInit(session.handle, mech, key.handle); err != nil {
 		return nil, err
 	}
-	plaintext, err := session.ctx.Decrypt(session.handle, ciphertext)
+	plaintext, err := opResult(session.ctx.Decrypt(session.handle, ciphertext))
 	if err != nil {
 		return nil, &rsaDecryptError{err}
 	}
@@ -573,7 +573,7 @@ func decryptOAEP(session *pkcs11Session, key *pkcs11PrivateKeyRSA, ciphertext []
 	if err != nil {
 		return nil, err
 	}
-	plaintext, err := session.ctx.Decrypt(session.handle, ciphertext)
+	plaintext, err := opResult(session.ctx.Decrypt(session.handle, ciphertext))
 	if err != nil {
 		return nil, &rsaDecryptError{err}
 	}
@@ -655,7 +655,7 @@ func signPSS(session *pkcs11Session, key *pkcs11PrivateKeyRSA, digest []byte, op
 	if err = session.ctx.SignInit(session.handle, mech, key.handle); err != nil {
 		return nil, err
 	}
-	return session.ctx.Sign(session.handle, digest)
+	return opResult(session.ctx.Sign(session.handle, digest))
 }
 
 var pkcs1Prefix = map[crypto.Hash][]byte{
@@ -689,7 +689,7 @@ func signPKCS1v15(session *pkcs11Session, key *pkcs11PrivateKeyRSA, digest []byt
 	mech := pkcs11.NewMechanism(pkcs11.CKM_RSA_PKCS, nil)
 	err = session.ctx.SignInit(session.handle, mech, key.handle)
 	if err == nil {
-		signature, err = session.ctx.Sign(session.handle, T)
+		signature, err = opResult(session.ctx.Sign(session.handle, T))
 	}
 	return
 }

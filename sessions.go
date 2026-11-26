@@ -7,6 +7,7 @@ package crypto11
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 
 	pkcs11 "github.com/eclipse-keypont/pkcs11-go/cryptoki"
@@ -54,12 +55,40 @@ func (c *Context) putSession(session *pkcs11Session, err error) {
 	c.pool.Put(session)
 }
 
+// errOperationAbandoned marks the error of a token operation, run after its C_*Init, that did not
+// come from the token: the binding gave up on the call, for instance on an output over its size
+// limit, and the token was never told, so the operation may still be active on the session.
+// sessionFatal retires such a session, which would otherwise make the next caller's C_*Init fail
+// with CKR_OPERATION_ACTIVE.
+var errOperationAbandoned = errors.New("crypto11: token operation abandoned")
+
+// operationError returns err, the error of a token operation run after its C_*Init, marked with
+// errOperationAbandoned unless it is a bare pkcs11.Error: the token's own return value, after
+// which PKCS#11 says the operation has ended.
+func operationError(err error) error {
+	if err == nil {
+		return nil
+	}
+	if _, fromToken := err.(pkcs11.Error); fromToken { //nolint:errorlint // only the bare value says the token answered
+		return err
+	}
+	return fmt.Errorf("%w: %w", errOperationAbandoned, err)
+}
+
+// opResult is operationError for a call that returns a value as well.
+func opResult[T any](v T, err error) (T, error) {
+	return v, operationError(err)
+}
+
 // sessionFatal reports whether err says the session it came from — or the token
 // behind it — can no longer be used. The list is deliberately narrow: an error
 // about the request (a bad mechanism, a wrong key, an invalid PIN) leaves the
 // session perfectly usable, and recycling on those would just cost a C_OpenSession
 // per failed call.
 func sessionFatal(err error) bool {
+	if errors.Is(err, errOperationAbandoned) {
+		return true
+	}
 	var p11Err pkcs11.Error
 	if !errors.As(err, &p11Err) {
 		return false

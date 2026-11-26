@@ -252,7 +252,7 @@ func (v *pairVerifier) sign() bool {
 	if err := v.session.ctx.SignInit(v.session.handle, pkcs11.NewMechanism(mechanism, nil), v.priv); err != nil {
 		return false
 	}
-	sig, err := v.session.ctx.Sign(v.session.handle, msg)
+	sig, err := opResult(v.session.ctx.Sign(v.session.handle, msg))
 	if err != nil || len(sig) == 0 {
 		return false
 	}
