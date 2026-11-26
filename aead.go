@@ -35,6 +35,8 @@ var errGCMNonceLength = errors.New("crypto11: incorrect nonce length given to GC
 
 // errGCMIVNotGenerated is the panic value of Seal when Config.UseGCMIVFromHSM is set but the token
 // did not generate the IV. Every message would then be encrypted under the same IV.
+var errAEADOutputLength = errors.New("crypto11: the token returned GCM output of the wrong length")
+
 var errGCMIVNotGenerated = errors.New("crypto11: UseGCMIVFromHSM is set but the token did not generate a GCM IV")
 
 // minGCMNonceSize is the shortest GCM IV NewGCM accepts: 96 bits, as NIST SP 800-38D recommends.
@@ -158,6 +160,11 @@ func (g genericAead) Seal(dst, nonce, plaintext, additionalData []byte) []byte {
 				return errGCMIVNotGenerated
 			}
 		}
+		// Ciphertext and tag, nothing more or less: a short result would hand the caller a
+		// truncated tag, which a verifier could be made to accept.
+		if (!hsmIV || supplied) && len(result) != len(plaintext)+g.overhead {
+			return fmt.Errorf("%w: %d bytes for %d bytes of plaintext", errAEADOutputLength, len(result), len(plaintext))
+		}
 
 		return
 	}); err != nil {
@@ -168,8 +175,12 @@ func (g genericAead) Seal(dst, nonce, plaintext, additionalData []byte) []byte {
 }
 
 func (g genericAead) Open(dst, nonce, ciphertext, additionalData []byte) ([]byte, error) {
-	if g.ivSupplied(false) && len(nonce) != g.nonceSize {
+	supplied := g.ivSupplied(false)
+	if supplied && len(nonce) != g.nonceSize {
 		return nil, errGCMNonceLength
+	}
+	if len(ciphertext) < g.overhead {
+		return nil, fmt.Errorf("%w: %d-byte ciphertext is shorter than the tag", errAEADOutputLength, len(ciphertext))
 	}
 	var result []byte
 	if err := g.key.context.withSession(func(session *pkcs11Session) (err error) {
@@ -186,6 +197,12 @@ func (g genericAead) Open(dst, nonce, ciphertext, additionalData []byte) ([]byte
 		if result, err = opResult(session.ctx.Decrypt(session.handle, ciphertext)); err != nil {
 			err = fmt.Errorf("C_Decrypt: %w", err)
 			return
+		}
+		// The plaintext is the ciphertext less the tag. Where the token appends its own IV the
+		// layout is the token's, and only an overlong result is refused.
+		if (supplied && len(result) != len(ciphertext)-g.overhead) || len(result) > len(ciphertext) {
+			pkcs11.Wipe(result)
+			return fmt.Errorf("%w: %d bytes of plaintext for %d bytes of ciphertext", errAEADOutputLength, len(result), len(ciphertext))
 		}
 		return
 	}); err != nil {
