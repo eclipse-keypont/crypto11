@@ -146,7 +146,7 @@ func (c *Context) GenerateRSAKeyPairWithAttributes(public, private AttributeSet,
 
 	var k SignerDecrypter
 
-	err := c.withSession(func(session *pkcs11Session) error {
+	err := c.withObjectSession([]AttributeSet{public, private}, func(session *pkcs11Session) error {
 
 		public.AddIfNotPresent([]*pkcs11.Attribute{
 			pkcs11.NewAttribute(pkcs11.CKA_CLASS, pkcs11.CKO_PUBLIC_KEY),

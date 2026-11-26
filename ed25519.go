@@ -141,7 +141,7 @@ func (c *Context) GenerateEd25519KeyPairWithAttributes(public, private Attribute
 	}
 
 	var k Signer
-	err := c.withSession(func(session *pkcs11Session) error {
+	err := c.withObjectSession([]AttributeSet{public, private}, func(session *pkcs11Session) error {
 		mech := pkcs11.NewMechanism(pkcs11.CKM_EC_EDWARDS_KEY_PAIR_GEN, nil)
 		pubHandle, privHandle, err := session.ctx.GenerateKeyPair(session.handle,
 			mech,

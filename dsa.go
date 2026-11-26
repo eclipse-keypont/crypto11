@@ -174,7 +174,7 @@ func (c *Context) GenerateDSAKeyPairWithAttributes(public, private AttributeSet,
 	}
 
 	var k Signer
-	err := c.withSession(func(session *pkcs11Session) error {
+	err := c.withObjectSession([]AttributeSet{public, private}, func(session *pkcs11Session) error {
 		p := params.P.Bytes()
 		q := params.Q.Bytes()
 		g := params.G.Bytes()

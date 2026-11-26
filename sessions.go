@@ -111,6 +111,41 @@ func sessionFatal(err error) bool {
 	return false
 }
 
+// isSessionObject reports whether attrs makes a session object: CKA_TOKEN set to false.
+func isSessionObject(attrs AttributeSet) bool {
+	a, ok := attrs[pkcs11.CKA_TOKEN]
+	return ok && a != nil && len(a.Value) > 0 && a.Value[0] == 0
+}
+
+// withObjectSession runs f, which creates objects from templates and returns them to the caller.
+//
+// A session object (CKA_TOKEN = false) lives only as long as the session that created it, and a
+// pooled session can be closed at any time: retired after an error, perhaps on another caller's
+// operation. So when any template makes a session object, f runs on the Context's persistent
+// session, which lasts as long as the Context, one caller at a time; otherwise on a pooled
+// session, as withSession.
+func (c *Context) withObjectSession(templates []AttributeSet, f func(session *pkcs11Session) error) error {
+	for _, t := range templates {
+		if isSessionObject(t) {
+			return c.withPersistentSession(f)
+		}
+	}
+	return c.withSession(f)
+}
+
+// withPersistentSession runs f on the Context's persistent session, holding the Context's read
+// lock, as getSession does, and persistentMu, since a session must not be used concurrently.
+func (c *Context) withPersistentSession(f func(session *pkcs11Session) error) error {
+	c.ops.RLock()
+	defer c.ops.RUnlock()
+	if c.closed.Get() {
+		return errors.New("context is closed")
+	}
+	c.persistentMu.Lock()
+	defer c.persistentMu.Unlock()
+	return f(&pkcs11Session{c.ctx.Ctx, c.persistentSession})
+}
+
 // getSession retrieves a session from the pool, respecting the timeout defined in the Context config.
 // Callers are responsible for handing this session back through putSession.
 //

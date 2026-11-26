@@ -231,7 +231,7 @@ func (c *Context) GenerateECDSAKeyPairWithAttributes(public, private AttributeSe
 	}
 
 	var k Signer
-	err := c.withSession(func(session *pkcs11Session) error {
+	err := c.withObjectSession([]AttributeSet{public, private}, func(session *pkcs11Session) error {
 
 		parameters, err := marshalEcParams(curve)
 		if err != nil {

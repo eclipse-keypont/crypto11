@@ -347,7 +347,7 @@ func (c *Context) GenerateMLKEMKeyPairWithAttributes(public, private AttributeSe
 	// from the private template even when the caller supplied it.
 	private.Unset(pkcs11.CKA_PARAMETER_SET)
 	var k MLKEMKeyPair
-	err := c.withSession(func(session *pkcs11Session) error {
+	err := c.withObjectSession([]AttributeSet{public, private}, func(session *pkcs11Session) error {
 		public.AddIfNotPresent([]*pkcs11.Attribute{
 			pkcs11.NewAttribute(pkcs11.CKA_CLASS, pkcs11.CKO_PUBLIC_KEY),
 			pkcs11.NewAttribute(pkcs11.CKA_KEY_TYPE, pkcs11.CKK_ML_KEM),

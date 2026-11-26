@@ -217,8 +217,10 @@ type Context struct {
 	pool  *pool.ResourcePool
 
 	// persistentSession is a session held open so we can be confident handles and login status
-	// persist for the duration of this context
+	// persist for the duration of this context. Session objects are created on it too (see
+	// withObjectSession), one caller at a time under persistentMu.
 	persistentSession pkcs11.SessionHandle
+	persistentMu      sync.Mutex
 }
 
 // Signer is a PKCS#11 key that implements crypto.Signer.

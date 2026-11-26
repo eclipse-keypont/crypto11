@@ -540,7 +540,7 @@ func (c *Context) ImportCertificateWithAttributes(template AttributeSet, certifi
 		pkcs11.NewAttribute(pkcs11.CKA_VALUE, certificate.Raw),
 	})
 
-	err = c.withSession(func(session *pkcs11Session) error {
+	err = c.withObjectSession([]AttributeSet{template}, func(session *pkcs11Session) error {
 		_, err = session.ctx.CreateObject(session.handle, template.ToSlice())
 		return err
 	})
