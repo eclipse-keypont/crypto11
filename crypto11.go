@@ -295,24 +295,48 @@ type Encapsulator interface {
 	Encapsulate(sharedSecretAttrs AttributeSet) (ciphertext []byte, sharedSecret *SecretKey, err error)
 }
 
+// errAmbiguousToken is returned when more than one token matches the configured label or serial
+// number. Labels are chosen by whoever initialises a token, and nothing makes them unique.
+var errAmbiguousToken = errors.New("more than one PKCS#11 token matches")
+
 // findToken finds a token given exactly one of serial, label or slotNumber
 func (c *Context) findToken(slots []pkcs11.SlotID, serial, label string, slotNumber *int) (pkcs11.SlotID, *pkcs11.TokenInfo, error) {
-	for _, slot := range slots {
-
+	infos := make([]pkcs11.TokenInfo, len(slots))
+	for i, slot := range slots {
 		tokenInfo, err := c.ctx.GetTokenInfo(slot)
 		if err != nil {
 			return 0, nil, err
 		}
-
-		if (slotNumber != nil && pkcs11.SlotID(*slotNumber) == slot) ||
-			(tokenInfo.SerialNumber != "" && tokenInfo.SerialNumber == serial) ||
-			(tokenInfo.Label != "" && tokenInfo.Label == label) {
-
-			return slot, &tokenInfo, nil
-		}
-
+		infos[i] = tokenInfo
 	}
-	return 0, nil, errTokenNotFound
+	i, err := selectToken(slots, infos, serial, label, slotNumber)
+	if err != nil {
+		return 0, nil, err
+	}
+	return slots[i], &infos[i], nil
+}
+
+// selectToken returns the index of the one token, among slots and their token infos, that
+// matches the selector, exactly one of serial, label or slotNumber. More than one match is an
+// error rather than a choice: a token whose label or serial copies the intended one's, initialised
+// in another slot, would otherwise be picked whenever its slot is listed first.
+func selectToken(slots []pkcs11.SlotID, infos []pkcs11.TokenInfo, serial, label string, slotNumber *int) (int, error) {
+	match := -1
+	var matchSlot pkcs11.SlotID
+	for i, slot := range slots {
+		if (slotNumber != nil && pkcs11.SlotID(*slotNumber) == slot) ||
+			(infos[i].SerialNumber != "" && infos[i].SerialNumber == serial) ||
+			(infos[i].Label != "" && infos[i].Label == label) {
+			if match >= 0 {
+				return 0, fmt.Errorf("%w: slots %d and %d", errAmbiguousToken, matchSlot, slot)
+			}
+			match, matchSlot = i, slot
+		}
+	}
+	if match < 0 {
+		return 0, errTokenNotFound
+	}
+	return match, nil
 }
 
 // Config holds PKCS#11 configuration information.
