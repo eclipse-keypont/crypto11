@@ -358,7 +358,8 @@ func selectToken(slots []pkcs11.SlotID, infos []pkcs11.TokenInfo, serial, label 
 //
 // Supply this to Configure(), or alternatively use ConfigureFromFile().
 type Config struct {
-	// Full path to PKCS#11 library.
+	// Full path to PKCS#11 library. It must be absolute: a relative path would be resolved
+	// against the working directory, and loading a library runs its code.
 	Path string
 
 	// Token serial number.
@@ -464,16 +465,19 @@ func openModule(path string) (moduleCtx, error) {
 	moduleReferencesMutex.Lock()
 	defer moduleReferencesMutex.Unlock()
 
-	// Normalise to an absolute path BEFORE consulting the cache. The cache key
-	// and the actual library load must agree; otherwise two callers using
-	// different spellings of the same library ("./lib.so" vs "/opt/lib.so")
-	// would each open and C_Initialize the module separately, and the second
-	// C_Initialize fails with CKR_CRYPTOKI_ALREADY_INITIALIZED. pkcs11-go also
-	// requires an absolute path.
-	absPath, err := filepath.Abs(path)
-	if err != nil {
-		return moduleCtx{}, fmt.Errorf("failed to resolve module path: %w", err)
+	// A relative path is refused, as pkcs11-go refuses it: resolved against the
+	// working directory, it would load whatever library sits there under that
+	// name, and loading a module runs its code. Making it absolute here, as this
+	// function used to, defeated that check.
+	if !filepath.IsAbs(path) {
+		return moduleCtx{}, fmt.Errorf("module path must be absolute, got %q", path)
 	}
+	// Clean BEFORE consulting the cache. The cache key and the actual library
+	// load must agree; otherwise two spellings of the same library
+	// ("/opt/./lib.so" vs "/opt/lib.so") would each open and C_Initialize the
+	// module separately, and the second C_Initialize fails with
+	// CKR_CRYPTOKI_ALREADY_INITIALIZED.
+	absPath := filepath.Clean(path)
 
 	if mod, ok := moduleReferences[absPath]; ok {
 		// Module with given path has been already initialized.
