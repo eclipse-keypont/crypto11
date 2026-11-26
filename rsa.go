@@ -210,11 +210,7 @@ func (c *Context) FindRSAPrivateKey(id []byte, label []byte) (RSAPrivateKey, err
 		return nil, err
 	}
 
-	if len(result) == 0 {
-		return nil, fmt.Errorf("private key with id=%x and label=%x was not found or is empty", id, label)
-	}
-
-	return result[0], nil
+	return onlyMatch(result, fmt.Sprintf("private key with id=%x and label=%x", id, label))
 }
 
 // FindRSAPrivateKeys retrieves all matching asymmetric RSA private keys, or a nil slice if none can
@@ -271,6 +267,9 @@ func (c *Context) FindRSAPrivateKeysWithAttributes(attributes AttributeSet) (pks
 		privAttributes := attributes.Copy()
 		err = privAttributes.Set(pkcs11.CKA_CLASS, pkcs11.CKO_PRIVATE_KEY)
 		if err != nil {
+			return err
+		}
+		if err := c.requirePrivateObject(privAttributes); err != nil {
 			return err
 		}
 
@@ -345,11 +344,7 @@ func (c *Context) FindRSAKeyPair(id []byte, label []byte) (SignerDecrypter, erro
 		return nil, err
 	}
 
-	if len(result) == 0 {
-		return nil, fmt.Errorf("key pair with id=%x and label=%x was not found or is empty", id, label)
-	}
-
-	return result[0], nil
+	return onlyMatch(result, fmt.Sprintf("key pair with id=%x and label=%x", id, label))
 }
 
 // FindRSAKeyPairs retrieves all matching asymmetric RSA key pairs, or a nil slice if none can be
@@ -413,6 +408,9 @@ func (c *Context) FindRSAKeyPairsWithAttributes(attributes AttributeSet) (signer
 		privAttributes := attributes.Copy()
 		err = privAttributes.Set(pkcs11.CKA_CLASS, pkcs11.CKO_PRIVATE_KEY)
 		if err != nil {
+			return err
+		}
+		if err := c.requirePrivateObject(privAttributes); err != nil {
 			return err
 		}
 

@@ -26,6 +26,20 @@
 // Symmetric keys can also be generated. These are found later using FindKey.
 // See the documentation for SecretKey for further information.
 //
+// # Finding keys
+//
+// The finders look keys up by CKA_ID, CKA_LABEL or other attributes. When the
+// Context logs in, a secret or private key matches only if it is a private
+// object (CKA_PRIVATE = true), as every key crypto11 generates is. Only a
+// logged-in user can create a private object, whereas many tokens let any
+// session create public ones, so a public object carrying the right ID or label
+// could otherwise stand in for the real key. To find a key that is a public
+// object, pass CKA_PRIVATE = false to one of the WithAttributes finders.
+//
+// A finder that returns a single key (FindKey, FindKeyPair, FindPrivateKey,
+// FindRSAKeyPair, FindMLKEMKeyPair and their variants) reports an error when
+// more than one key matches, rather than picking one.
+//
 // # Sessions and concurrency
 //
 // Note that PKCS#11 session handles must not be used concurrently

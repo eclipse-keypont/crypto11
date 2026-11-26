@@ -514,10 +514,7 @@ func (c *Context) FindMLKEMKeyPair(id, label []byte) (MLKEMKeyPair, error) {
 	if err != nil {
 		return nil, err
 	}
-	if len(result) == 0 {
-		return nil, fmt.Errorf("ML-KEM key pair with id=%x and label=%x was not found", id, label)
-	}
-	return result[0], nil
+	return onlyMatch(result, fmt.Sprintf("ML-KEM key pair with id=%x and label=%x", id, label))
 }
 
 // FindMLKEMKeyPairs retrieves all matching ML-KEM key pairs, or a nil slice if none can be found.
@@ -561,6 +558,9 @@ func (c *Context) FindMLKEMKeyPairsWithAttributes(attributes AttributeSet) ([]ML
 			return err
 		}
 		if err := privAttrs.Set(pkcs11.CKA_KEY_TYPE, pkcs11.CKK_ML_KEM); err != nil {
+			return err
+		}
+		if err := c.requirePrivateObject(privAttrs); err != nil {
 			return err
 		}
 

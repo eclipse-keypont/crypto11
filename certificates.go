@@ -420,6 +420,9 @@ func (c *Context) FindAllPairedCertificates() (certificates []tls.Certificate, e
 		if err != nil {
 			return err
 		}
+		if err := c.requirePrivateObject(privAttributes); err != nil {
+			return err
+		}
 
 		privHandles, err := findKeysWithAttributes(session, privAttributes.ToSlice())
 		if err != nil {
