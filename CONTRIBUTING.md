@@ -133,7 +133,7 @@ actually shorten the diagnosis are:
 
 ## Development environment
 
-- **Go** — the version in [`.go-version`](./.go-version) (currently 1.27.3). CI builds against it;
+- **Go** — the version in [`.go-version`](./.go-version) (currently 1.27.4). CI builds against it;
   older toolchains may work but aren't tested.
 - **A PKCS#11 token** — optional for a first build, required for meaningful test coverage. See
   [Testing against a token](#testing-against-a-token).

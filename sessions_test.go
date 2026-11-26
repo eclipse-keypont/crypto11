@@ -151,6 +151,9 @@ func TestSessionFatal(t *testing.T) {
 		pkcs11.CKR_SESSION_HANDLE_INVALID, pkcs11.CKR_SESSION_CLOSED, pkcs11.CKR_DEVICE_ERROR,
 		pkcs11.CKR_DEVICE_REMOVED, pkcs11.CKR_TOKEN_NOT_PRESENT, pkcs11.CKR_GENERAL_ERROR,
 		pkcs11.CKR_OPERATION_ACTIVE,
+		// Not about the request: the login is gone, and the replacement session's
+		// check reports it (TestLoginLostIsReported).
+		pkcs11.CKR_USER_NOT_LOGGED_IN,
 	}
 	for _, code := range fatal {
 		assert.True(t, sessionFatal(pkcs11.Error(code)), "%v must discard the session", pkcs11.Error(code))
@@ -160,7 +163,7 @@ func TestSessionFatal(t *testing.T) {
 
 	benign := []uint{
 		pkcs11.CKR_PIN_INCORRECT, pkcs11.CKR_MECHANISM_INVALID, pkcs11.CKR_KEY_HANDLE_INVALID,
-		pkcs11.CKR_USER_NOT_LOGGED_IN, pkcs11.CKR_TEMPLATE_INCONSISTENT, pkcs11.CKR_OBJECT_HANDLE_INVALID,
+		pkcs11.CKR_TEMPLATE_INCONSISTENT, pkcs11.CKR_OBJECT_HANDLE_INVALID,
 	}
 	for _, code := range benign {
 		assert.False(t, sessionFatal(pkcs11.Error(code)), "%v must keep the session", pkcs11.Error(code))

@@ -298,6 +298,8 @@ var mlkemFuzzParamSets = []MLKEMParameterSet{MLKEM512, MLKEM768, MLKEM1024}
 // looks like: the output is the size the parameter set calls for, derivation is
 // deterministic, and two parameter sets never derive the same key from one secret — the
 // domain separation that mixing mlkemAlgorithmID into the KMAC context exists to provide.
+// The KDF is fuzzed through mlkemDeriveKey, since MLKEMDeriveKey itself accepts only a
+// 32-byte secret, which is also checked.
 //
 // Secret lengths around the KMAC rates (136 and 168 bytes) are seeded deliberately: that is
 // where bytepad changes the number of blocks absorbed.
@@ -311,7 +313,10 @@ func FuzzMLKEMDeriveKey(f *testing.F) {
 		derived := make([][]byte, 0, len(mlkemFuzzParamSets))
 
 		for _, paramSet := range mlkemFuzzParamSets {
-			key, err := MLKEMDeriveKey(paramSet, secret)
+			if _, err := MLKEMDeriveKey(paramSet, secret); (err == nil) != (len(secret) == mlkemSharedSecretSize) {
+				t.Fatalf("parameter set %d, %d-byte secret: MLKEMDeriveKey error = %v", paramSet, len(secret), err)
+			}
+			key, err := mlkemDeriveKey(paramSet, secret)
 			if err != nil {
 				t.Fatalf("parameter set %d: %v", paramSet, err)
 			}
@@ -320,7 +325,7 @@ func FuzzMLKEMDeriveKey(f *testing.F) {
 				t.Fatalf("parameter set %d derived %d bytes, want %d", paramSet, len(key), want)
 			}
 
-			again, err := MLKEMDeriveKey(paramSet, secret)
+			again, err := mlkemDeriveKey(paramSet, secret)
 			if err != nil {
 				t.Fatalf("parameter set %d, second derivation: %v", paramSet, err)
 			}

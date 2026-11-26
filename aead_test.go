@@ -92,3 +92,23 @@ func TestGCMIVFromHSMNotGenerated(t *testing.T) {
 		assert.Equal(t, errGCMNonceLength, sealPanic(aead, nil))
 	})
 }
+
+// TestGCMOutputLengthChecked checks that Open refuses a ciphertext shorter than the tag without
+// asking the token, and that Seal and Open still accept the exact lengths they check for.
+func TestGCMOutputLengthChecked(t *testing.T) {
+	key := gcmKey(t, func(*Config) {})
+	aead, err := key.NewGCM()
+	require.NoError(t, err)
+	nonce := make([]byte, aead.NonceSize())
+
+	_, err = aead.Open(nil, nonce, make([]byte, aead.Overhead()-1), nil)
+	require.ErrorIs(t, err, errAEADOutputLength)
+
+	for _, plaintext := range [][]byte{nil, []byte("x"), make([]byte, 1000)} {
+		sealed := aead.Seal(nil, nonce, plaintext, []byte("aad"))
+		require.Len(t, sealed, len(plaintext)+aead.Overhead())
+		opened, err := aead.Open(nil, nonce, sealed, []byte("aad"))
+		require.NoError(t, err)
+		require.Len(t, opened, len(plaintext))
+	}
+}

@@ -33,6 +33,43 @@ var errForeignKey = errors.New("key belongs to a different Context")
 // an unknown type (an ML-KEM key pair, say) does not hide every other key on the token.
 var errUnsupportedKeyType = errors.New("unsupported key type")
 
+// errAmbiguousKey is returned by a finder for a single key when more than one key matches. It
+// does not pick one: which object a token lists first says nothing about which is the right one.
+var errAmbiguousKey = errors.New("more than one key matches")
+
+// onlyMatch returns the single element of result, a finder's matches for what. No match is an
+// error, and so is more than one (errAmbiguousKey).
+func onlyMatch[T any](result []T, what string) (T, error) {
+	var none T
+	switch len(result) {
+	case 0:
+		return none, fmt.Errorf("%s was not found or is empty", what)
+	case 1:
+		return result[0], nil
+	default:
+		return none, fmt.Errorf("%w: %s matches %d keys", errAmbiguousKey, what, len(result))
+	}
+}
+
+// requirePrivateObject adds CKA_PRIVATE = true to the template of a secret or private key
+// lookup, unless the caller's attributes already set CKA_PRIVATE, under the same rule as
+// defaultPrivate applies to the keys crypto11 generates.
+//
+// Only a logged-in user can create a private object, whereas many tokens let any session create
+// public ones without the PIN, secret and private keys included. Without this, a public object
+// carrying the caller's CKA_ID or CKA_LABEL would be taken for the key whenever the real one is
+// absent or listed after it. A Context configured with LoginNotSupported cannot see private
+// objects, so there the requirement would find nothing, and is not added.
+func (c *Context) requirePrivateObject(attributes AttributeSet) error {
+	if !c.defaultPrivate() {
+		return nil
+	}
+	if _, ok := attributes[pkcs11.CKA_PRIVATE]; ok {
+		return nil
+	}
+	return attributes.Set(pkcs11.CKA_PRIVATE, true)
+}
+
 func findKeysWithAttributes(session *pkcs11Session, template []*pkcs11.Attribute) (handles []pkcs11.ObjectHandle, err error) {
 	if err = session.ctx.FindObjectsInit(session.handle, template); err != nil {
 		return nil, err
@@ -296,11 +333,7 @@ func (c *Context) FindKeyPair(id []byte, label []byte) (Signer, error) {
 		return nil, err
 	}
 
-	if len(result) == 0 {
-		return nil, fmt.Errorf("key pair with id=%x and label=%x was not found or is empty", id, label)
-	}
-
-	return result[0], nil
+	return onlyMatch(result, fmt.Sprintf("key pair with id=%x and label=%x", id, label))
 }
 
 // FindKeyPairs retrieves all matching asymmetric key pairs, or a nil slice if none can be found.
@@ -358,11 +391,7 @@ func (c *Context) FindKeyPairWithAttributes(attributes AttributeSet) (Signer, er
 		return nil, err
 	}
 
-	if len(result) == 0 {
-		return nil, fmt.Errorf("key pair with attributes=%v was not found or is empty", attributes)
-	}
-
-	return result[0], nil
+	return onlyMatch(result, fmt.Sprintf("key pair with attributes=%v", attributes))
 }
 
 // FindKeyPairsWithAttributes retrieves previously created asymmetric key pairs, or nil if none can be found.
@@ -393,6 +422,9 @@ func (c *Context) FindKeyPairsWithAttributes(attributes AttributeSet) (signer []
 		privAttributes := attributes.Copy()
 		err = privAttributes.Set(pkcs11.CKA_CLASS, pkcs11.CKO_PRIVATE_KEY)
 		if err != nil {
+			return err
+		}
+		if err := c.requirePrivateObject(privAttributes); err != nil {
 			return err
 		}
 
@@ -463,11 +495,7 @@ func (c *Context) FindKey(id []byte, label []byte) (*SecretKey, error) {
 		return nil, err
 	}
 
-	if len(result) == 0 {
-		return nil, fmt.Errorf("key with id=%x and label=%x was not found or is empty", id, label)
-	}
-
-	return result[0], nil
+	return onlyMatch(result, fmt.Sprintf("key with id=%x and label=%x", id, label))
 }
 
 // FindKeys retrieves all matching symmetric keys, or a nil slice if none can be found.
@@ -511,11 +539,7 @@ func (c *Context) FindKeyWithAttributes(attributes AttributeSet) (*SecretKey, er
 		return nil, err
 	}
 
-	if len(result) == 0 {
-		return nil, fmt.Errorf("key with attributes=%v was not found or is empty", attributes)
-	}
-
-	return result[0], nil
+	return onlyMatch(result, fmt.Sprintf("key with attributes=%v", attributes))
 }
 
 // FindKeysWithAttributes retrieves previously created symmetric keys, or a nil slice if none can be found.
@@ -536,6 +560,9 @@ func (c *Context) FindKeysWithAttributes(attributes AttributeSet) ([]*SecretKey,
 		privAttributes := attributes.Copy()
 		err := privAttributes.Set(pkcs11.CKA_CLASS, pkcs11.CKO_SECRET_KEY)
 		if err != nil {
+			return err
+		}
+		if err := c.requirePrivateObject(privAttributes); err != nil {
 			return err
 		}
 
@@ -603,10 +630,12 @@ func (c *Context) makePrivateKey(session *pkcs11Session, privHandle *pkcs11.Obje
 		return result, nil
 
 	case pkcs11.CKK_RSA:
+		resultPkcs11PrivateKey.checkKey = rsaCheckKey(session, *privHandle)
 		result := &pkcs11PrivateKeyRSA{pkcs11PrivateKey: resultPkcs11PrivateKey}
 		return result, nil
 
 	case pkcs11.CKK_ECDSA:
+		resultPkcs11PrivateKey.checkKey = publicKeyFromInfo(session, *privHandle)
 		result := &pkcs11PrivateKeyECDSA{pkcs11PrivateKey: resultPkcs11PrivateKey}
 		return result, nil
 
@@ -614,6 +643,7 @@ func (c *Context) makePrivateKey(session *pkcs11Session, privHandle *pkcs11.Obje
 		if err := checkEd25519PrivateKey(session, *privHandle); err != nil {
 			return nil, err
 		}
+		resultPkcs11PrivateKey.checkKey = publicKeyFromInfo(session, *privHandle)
 		result := &pkcs11PrivateKeyEd25519{pkcs11PrivateKey: resultPkcs11PrivateKey}
 		return result, nil
 
@@ -635,11 +665,7 @@ func (c *Context) FindPrivateKey(id []byte, label []byte) (PrivateKey, error) {
 		return nil, err
 	}
 
-	if len(result) == 0 {
-		return nil, fmt.Errorf("private key with id=%x and label=%x was not found or is empty", id, label)
-	}
-
-	return result[0], nil
+	return onlyMatch(result, fmt.Sprintf("private key with id=%x and label=%x", id, label))
 }
 
 // FindPrivateKeys retrieves all matching asymmetric private keys, or a nil slice if none can be found.
@@ -684,11 +710,7 @@ func (c *Context) FindPrivateKeyWithAttributes(attributes AttributeSet) (Private
 		return nil, err
 	}
 
-	if len(result) == 0 {
-		return nil, fmt.Errorf("private key with attributes=%v was not found or is empty", attributes)
-	}
-
-	return result[0], nil
+	return onlyMatch(result, fmt.Sprintf("private key with attributes=%v", attributes))
 }
 
 // FindPrivateKeysWithAttributes retrieves previously created asymmetric private keys, or nil if none can be found.
@@ -710,6 +732,9 @@ func (c *Context) FindPrivateKeysWithAttributes(attributes AttributeSet) (signer
 		privAttributes := attributes.Copy()
 		err = privAttributes.Set(pkcs11.CKA_CLASS, pkcs11.CKO_PRIVATE_KEY)
 		if err != nil {
+			return err
+		}
+		if err := c.requirePrivateObject(privAttributes); err != nil {
 			return err
 		}
 

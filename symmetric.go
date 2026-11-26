@@ -291,7 +291,7 @@ func (c *Context) GenerateSecretKeyWithAttributes(template AttributeSet, bits in
 		return nil, errClosed
 	}
 
-	err = c.withSession(func(session *pkcs11Session) error {
+	err = c.withObjectSession([]AttributeSet{template}, func(session *pkcs11Session) error {
 
 		// A cipher can list several (key type, mechanism) pairs, tried in
 		// order. The HMAC ciphers do: PKCS#11 v3.0 added CKM_SHA*_KEY_GEN for

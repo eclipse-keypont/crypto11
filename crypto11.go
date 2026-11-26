@@ -26,6 +26,20 @@
 // Symmetric keys can also be generated. These are found later using FindKey.
 // See the documentation for SecretKey for further information.
 //
+// # Finding keys
+//
+// The finders look keys up by CKA_ID, CKA_LABEL or other attributes. When the
+// Context logs in, a secret or private key matches only if it is a private
+// object (CKA_PRIVATE = true), as every key crypto11 generates is. Only a
+// logged-in user can create a private object, whereas many tokens let any
+// session create public ones, so a public object carrying the right ID or label
+// could otherwise stand in for the real key. To find a key that is a public
+// object, pass CKA_PRIVATE = false to one of the WithAttributes finders.
+//
+// A finder that returns a single key (FindKey, FindKeyPair, FindPrivateKey,
+// FindRSAKeyPair, FindMLKEMKeyPair and their variants) reports an error when
+// more than one key matches, rather than picking one.
+//
 // # Sessions and concurrency
 //
 // Note that PKCS#11 session handles must not be used concurrently
@@ -78,6 +92,7 @@
 package crypto11
 
 import (
+	"context"
 	"crypto"
 	"encoding/json"
 	"errors"
@@ -149,6 +164,20 @@ type pkcs11PrivateKey struct {
 	// pubKey is an exported copy of the public key. We pre-export the key material because crypto.Signer.Public
 	// doesn't allow us to return errors.
 	pubKey crypto.PublicKey
+
+	// checkKey is the public key a signature is verified with before it is returned, for a key
+	// found without its public half (pubKey nil): read from the private key object itself. It is
+	// nil when the token exposes none.
+	checkKey crypto.PublicKey
+}
+
+// verificationKey returns the public key Sign checks signatures against: the key pair's public
+// half, or the one read from the private key object, or nil.
+func (k *pkcs11PrivateKey) verificationKey() crypto.PublicKey {
+	if k.pubKey != nil {
+		return k.pubKey
+	}
+	return k.checkKey
 }
 
 // Delete implements Signer.Delete.
@@ -189,11 +218,22 @@ type Context struct {
 	// closeOnce makes Close idempotent.
 	closeOnce sync.Once
 
-	// ops is held for reading by every operation for as long as it holds a
-	// session out of the pool — getSession to putSession — and for writing by
-	// Close. Close therefore waits for operations in flight, and no operation
-	// can start between Close deciding to tear down and the teardown.
-	ops sync.RWMutex
+	// activeOps counts the operations holding a session, from beginOp in
+	// getSession to endOp in putSession, so that Close can wait for them.
+	// closing, under opsMu, is set by Close before it waits: from then on
+	// beginOp fails at once. A sync.RWMutex did this job before, but a waiting
+	// writer blocks new readers, so an operation started by a goroutine that
+	// already held a session (a CBC block mode and then an HMAC) deadlocked
+	// against a pending Close.
+	opsMu     sync.Mutex
+	closing   bool
+	activeOps sync.WaitGroup
+
+	// closeCtx is cancelled by Close, to wake operations waiting for a pooled
+	// session. One that holds a session already would otherwise wait for
+	// another for ever, and Close with it.
+	closeCtx    context.Context
+	cancelClose context.CancelFunc
 
 	ctx moduleCtx
 	cfg *Config
@@ -203,8 +243,10 @@ type Context struct {
 	pool  *pool.ResourcePool
 
 	// persistentSession is a session held open so we can be confident handles and login status
-	// persist for the duration of this context
+	// persist for the duration of this context. Session objects are created on it too (see
+	// withObjectSession), one caller at a time under persistentMu.
 	persistentSession pkcs11.SessionHandle
+	persistentMu      sync.Mutex
 }
 
 // Signer is a PKCS#11 key that implements crypto.Signer.
@@ -279,24 +321,48 @@ type Encapsulator interface {
 	Encapsulate(sharedSecretAttrs AttributeSet) (ciphertext []byte, sharedSecret *SecretKey, err error)
 }
 
+// errAmbiguousToken is returned when more than one token matches the configured label or serial
+// number. Labels are chosen by whoever initialises a token, and nothing makes them unique.
+var errAmbiguousToken = errors.New("more than one PKCS#11 token matches")
+
 // findToken finds a token given exactly one of serial, label or slotNumber
 func (c *Context) findToken(slots []pkcs11.SlotID, serial, label string, slotNumber *int) (pkcs11.SlotID, *pkcs11.TokenInfo, error) {
-	for _, slot := range slots {
-
+	infos := make([]pkcs11.TokenInfo, len(slots))
+	for i, slot := range slots {
 		tokenInfo, err := c.ctx.GetTokenInfo(slot)
 		if err != nil {
 			return 0, nil, err
 		}
-
-		if (slotNumber != nil && pkcs11.SlotID(*slotNumber) == slot) ||
-			(tokenInfo.SerialNumber != "" && tokenInfo.SerialNumber == serial) ||
-			(tokenInfo.Label != "" && tokenInfo.Label == label) {
-
-			return slot, &tokenInfo, nil
-		}
-
+		infos[i] = tokenInfo
 	}
-	return 0, nil, errTokenNotFound
+	i, err := selectToken(slots, infos, serial, label, slotNumber)
+	if err != nil {
+		return 0, nil, err
+	}
+	return slots[i], &infos[i], nil
+}
+
+// selectToken returns the index of the one token, among slots and their token infos, that
+// matches the selector, exactly one of serial, label or slotNumber. More than one match is an
+// error rather than a choice: a token whose label or serial copies the intended one's, initialised
+// in another slot, would otherwise be picked whenever its slot is listed first.
+func selectToken(slots []pkcs11.SlotID, infos []pkcs11.TokenInfo, serial, label string, slotNumber *int) (int, error) {
+	match := -1
+	var matchSlot pkcs11.SlotID
+	for i, slot := range slots {
+		if (slotNumber != nil && pkcs11.SlotID(*slotNumber) == slot) ||
+			(infos[i].SerialNumber != "" && infos[i].SerialNumber == serial) ||
+			(infos[i].Label != "" && infos[i].Label == label) {
+			if match >= 0 {
+				return 0, fmt.Errorf("%w: slots %d and %d", errAmbiguousToken, matchSlot, slot)
+			}
+			match, matchSlot = i, slot
+		}
+	}
+	if match < 0 {
+		return 0, errTokenNotFound
+	}
+	return match, nil
 }
 
 // Config holds PKCS#11 configuration information.
@@ -306,7 +372,8 @@ func (c *Context) findToken(slots []pkcs11.SlotID, serial, label string, slotNum
 //
 // Supply this to Configure(), or alternatively use ConfigureFromFile().
 type Config struct {
-	// Full path to PKCS#11 library.
+	// Full path to PKCS#11 library. It must be absolute: a relative path would be resolved
+	// against the working directory, and loading a library runs its code.
 	Path string
 
 	// Token serial number.
@@ -341,6 +408,11 @@ type Config struct {
 	UserType int
 
 	// Maximum time to wait for a session from the sessions pool. Zero means wait indefinitely.
+	//
+	// A caller that holds a session while it waits for another, such as a CBC block mode that
+	// is still open while an HMAC is written to, can wait for ever once every session is held
+	// that way: with zero, nothing ends that wait but Close. Set a timeout when requests use
+	// more than one key operation at a time.
 	PoolWaitTimeout time.Duration
 
 	// LoginNotSupported should be set to true for tokens that do not support logging in.
@@ -407,16 +479,19 @@ func openModule(path string) (moduleCtx, error) {
 	moduleReferencesMutex.Lock()
 	defer moduleReferencesMutex.Unlock()
 
-	// Normalise to an absolute path BEFORE consulting the cache. The cache key
-	// and the actual library load must agree; otherwise two callers using
-	// different spellings of the same library ("./lib.so" vs "/opt/lib.so")
-	// would each open and C_Initialize the module separately, and the second
-	// C_Initialize fails with CKR_CRYPTOKI_ALREADY_INITIALIZED. pkcs11-go also
-	// requires an absolute path.
-	absPath, err := filepath.Abs(path)
-	if err != nil {
-		return moduleCtx{}, fmt.Errorf("failed to resolve module path: %w", err)
+	// A relative path is refused, as pkcs11-go refuses it: resolved against the
+	// working directory, it would load whatever library sits there under that
+	// name, and loading a module runs its code. Making it absolute here, as this
+	// function used to, defeated that check.
+	if !filepath.IsAbs(path) {
+		return moduleCtx{}, fmt.Errorf("module path must be absolute, got %q", path)
 	}
+	// Clean BEFORE consulting the cache. The cache key and the actual library
+	// load must agree; otherwise two spellings of the same library
+	// ("/opt/./lib.so" vs "/opt/lib.so") would each open and C_Initialize the
+	// module separately, and the second C_Initialize fails with
+	// CKR_CRYPTOKI_ALREADY_INITIALIZED.
+	absPath := filepath.Clean(path)
 
 	if mod, ok := moduleReferences[absPath]; ok {
 		// Module with given path has been already initialized.
@@ -478,6 +553,7 @@ func (mc moduleCtx) Close() error {
 		_ = mc.Finalize()
 		mc.Destroy()
 		delete(moduleReferences, mc.path)
+		forgetLogins(mc.path)
 		return nil
 	}
 	// Decrement reference count.
@@ -540,6 +616,7 @@ func Configure(config *Config) (*Context, error) {
 		cfg: config,
 		ctx: modCtx,
 	}
+	instance.closeCtx, instance.cancelClose = context.WithCancel(context.Background())
 
 	// Everything acquired from here on is released again if Configure fails
 	// part-way. Dropping the module reference alone is not enough: when another
@@ -603,16 +680,10 @@ func Configure(config *Config) (*Context, error) {
 		} else {
 			pin = []byte(instance.cfg.Pin)
 		}
-		err = instance.ctx.Login(instance.persistentSession, userType, pin)
-		pkcs11.Wipe(pin)
-		if err != nil {
-
-			var pErr pkcs11.Error
-			isP11Error := errors.As(err, &pErr)
-
-			if !isP11Error || pErr != pkcs11.CKR_USER_ALREADY_LOGGED_IN {
-				return nil, fmt.Errorf("failed to log into long term session: %w", err)
-			}
+		// login wipes the PIN, and accepts CKR_USER_ALREADY_LOGGED_IN only for the PIN this
+		// process logged the token in with.
+		if err = instance.login(userType, pin); err != nil {
+			return nil, fmt.Errorf("failed to log into long term session: %w", err)
 		}
 	}
 
@@ -683,8 +754,10 @@ func castDown(orig uint) int {
 // and calls Configure. The configuration file should be a JSON representation
 // of a Config object.
 //
-// A file whose Pin is set is refused unless it is readable by its owner alone
-// (no group or other permission bits; not checked on Windows). Keeping the PIN
+// The file must be owned by the current user or root, and writable by its owner
+// alone, since it names the library Configure loads. A file whose Pin is set is
+// also refused unless it is readable by its owner alone (no group or other
+// permission bits). None of this is checked on Windows. Keeping the PIN
 // out of the file altogether — Configure with a PinFunc, or a Pin taken from a
 // secret store — is the better arrangement.
 func ConfigureFromFile(configLocation string) (*Context, error) {
@@ -725,6 +798,9 @@ func loadConfigFromFile(configLocation string) (*Config, error) {
 		if err != nil {
 			return nil, fmt.Errorf("could not stat config file: %w", err)
 		}
+		if err := checkConfigFileOwner(info); err != nil {
+			return nil, fmt.Errorf("config file %s is %w; whoever owns it can rewrite it", configLocation, err)
+		}
 		mode := info.Mode().Perm()
 		if mode&0o022 != 0 {
 			return nil, fmt.Errorf("config file %s is writable by other users (mode %04o); restrict writing to its owner (chmod go-w)", configLocation, mode)
@@ -745,9 +821,15 @@ func (c *Context) Close() error {
 	// pool and trip moduleCtx.Close's refcount panic.
 	var err error
 	c.closeOnce.Do(func() {
-		// Wait for every operation that holds a session, and keep new ones out.
-		c.ops.Lock()
-		defer c.ops.Unlock()
+		// Keep new operations out, wake those waiting for a pooled session, and
+		// wait for every operation that holds a session.
+		c.opsMu.Lock()
+		c.closing = true
+		c.opsMu.Unlock()
+		if c.cancelClose != nil {
+			c.cancelClose()
+		}
+		c.activeOps.Wait()
 
 		c.closed.Set(true)
 

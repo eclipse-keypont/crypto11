@@ -12,6 +12,7 @@ import (
 	"crypto/sha512"
 	"errors"
 	"hash"
+	"runtime"
 	"sync"
 	"testing"
 	"time"
@@ -42,18 +43,17 @@ func TestHmac(t *testing.T) {
 
 }
 
-// After a multi-part HMAC fails mid-operation, cleanup() releases the session and nils
-// it out. These tests cover the resulting dead-operation guards without an HSM: a
-// zero-value hmacImplementation has both session and result nil, the same dead state.
+// After a multi-part HMAC fails mid-operation, fail() releases the session and marks
+// the hash dead. These tests cover the resulting dead-operation guards without an HSM.
 func TestHmacWriteAfterSessionReleased(t *testing.T) {
-	hi := &hmacImplementation{}
+	hi := &hmacImplementation{dead: true}
 	n, err := hi.Write([]byte("data"))
 	require.Equal(t, errHmacClosed, err)
 	require.Zero(t, n)
 }
 
 func TestHmacSumAfterSessionReleased(t *testing.T) {
-	hi := &hmacImplementation{}
+	hi := &hmacImplementation{dead: true}
 	require.PanicsWithValue(t, errHmacClosed, func() {
 		hi.Sum(nil)
 	})
@@ -226,14 +226,15 @@ func testHmac(t *testing.T, ctx *Context, keyLabel string, keytype int, mech int
 			r2 := h1.Sum([]byte{})
 			require.Equal(t, r1, r2)
 
-			// Can't add more after Sum()
-			_, err = h1.Write(input)
-			require.Equal(t, errHmacClosed, err)
-
 			// 0-length is special
 			n, err = h1.Write([]byte{})
 			require.NoError(t, err)
 			require.Zero(t, n)
+
+			// Can't add more after Sum(), and trying leaves the hash dead.
+			_, err = h1.Write(input)
+			require.Equal(t, errHmacClosed, err)
+			require.Panics(t, func() { h1.Sum(nil) })
 		})
 		t.Run("Reset", func(t *testing.T) {
 
@@ -340,12 +341,15 @@ func TestHmacResetAfterDeadOperationDoesNotPanic(t *testing.T) {
 	closed := pool.NewResourcePool(func() (pool.Resource, error) { return nil, errors.New("unused") }, 1, 1, 0, 0)
 	closed.Close()
 	ctx := &Context{cfg: &Config{}, pool: closed}
-	hi := &hmacImplementation{key: &SecretKey{pkcs11Object: pkcs11Object{context: ctx}}}
-	// initialize fails (closed pool) — Reset must swallow that, as documented,
-	// and leave the hash dead rather than panicking on the way in.
+	hi := &hmacImplementation{key: &SecretKey{pkcs11Object: pkcs11Object{context: ctx}}, dead: true}
+	// Reset takes no session, so it cannot fail; the next Write tries to start
+	// an operation, fails on the closed pool, and leaves the hash dead.
 	require.NotPanics(t, func() { hi.Reset() })
 	_, err := hi.Write([]byte("x"))
+	require.Error(t, err)
+	_, err = hi.Write([]byte("x"))
 	require.Equal(t, errHmacClosed, err)
+	require.Panics(t, func() { hi.Sum(nil) })
 }
 
 func TestHmacResetFailureDoesNotReplayPreviousMAC(t *testing.T) {
@@ -373,10 +377,13 @@ func TestHmacResetFailureDoesNotReplayPreviousMAC(t *testing.T) {
 	first := h.Sum(nil)
 	require.Len(t, first, 32)
 
-	// Starve the pool, then Reset: the new session cannot be obtained.
+	// Starve the pool, then Reset and Write: the new operation cannot get a
+	// session.
 	held, err := ctx.getSession()
 	require.NoError(t, err)
 	h.Reset()
+	_, err = h.Write([]byte("second message"))
+	require.Error(t, err)
 	ctx.putSession(held, nil)
 
 	// The hash is dead. It must say so — not hand back the MAC of "first
@@ -384,4 +391,109 @@ func TestHmacResetFailureDoesNotReplayPreviousMAC(t *testing.T) {
 	_, err = h.Write([]byte("second message"))
 	require.Equal(t, errHmacClosed, err)
 	require.Panics(t, func() { h.Sum(nil) })
+}
+
+// TestHMACTakesNoSessionUntilWritten checks that NewHMAC and Reset take no
+// session from the pool: an HMAC that is created and never used, as when a
+// caller gives up before using it, costs nothing.
+func TestHMACTakesNoSessionUntilWritten(t *testing.T) {
+	cfg := testConfig(t)
+	cfg.MaxSessions = 2 // a single pooled session
+	cfg.PoolWaitTimeout = 200 * time.Millisecond
+	ctx, err := Configure(cfg)
+	require.NoError(t, err)
+	defer ctx.Close()
+	skipIfMechUnsupported(t, ctx, pkcs11.CKM_SHA256_HMAC)
+	key, found, err := findKeyOrCreate(ctx, "hmac0", pkcs11.CKK_SHA256_HMAC, 256)
+	require.NoError(t, err)
+	if !found {
+		defer key.Delete()
+	}
+
+	// More unused HMACs than the pool has sessions: each would otherwise strand one.
+	for range 3 {
+		_, err := key.NewHMAC(pkcs11.CKM_SHA256_HMAC, 0)
+		require.NoError(t, err)
+		require.Zero(t, ctx.PoolStats().InUse, "an unused HMAC holds a session")
+	}
+	h, err := key.NewHMAC(pkcs11.CKM_SHA256_HMAC, 0)
+	require.NoError(t, err)
+	h.Reset()
+	require.Zero(t, ctx.PoolStats().InUse, "Reset takes a session")
+
+	h, err = key.NewHMAC(pkcs11.CKM_SHA256_HMAC, 0)
+	require.NoError(t, err)
+	_, err = h.Write([]byte("message"))
+	require.NoError(t, err)
+	require.Len(t, h.Sum(nil), 32)
+	require.Zero(t, ctx.PoolStats().InUse, "Sum gives the session back")
+}
+
+// TestAbandonedHMACReleasesSession checks that an HMAC dropped between Write
+// and Sum gives its session back when it is finalized, and that the pool can
+// hand out a working session again.
+func TestAbandonedHMACReleasesSession(t *testing.T) {
+	cfg := testConfig(t)
+	cfg.MaxSessions = 2 // a single pooled session
+	cfg.PoolWaitTimeout = 200 * time.Millisecond
+	ctx, err := Configure(cfg)
+	require.NoError(t, err)
+	defer ctx.Close()
+	skipIfMechUnsupported(t, ctx, pkcs11.CKM_SHA256_HMAC)
+	key, found, err := findKeyOrCreate(ctx, "hmac0", pkcs11.CKK_SHA256_HMAC, 256)
+	require.NoError(t, err)
+	if !found {
+		defer key.Delete()
+	}
+
+	func() {
+		h, err := key.NewHMAC(pkcs11.CKM_SHA256_HMAC, 0)
+		require.NoError(t, err)
+		_, err = h.Write([]byte("abandoned"))
+		require.NoError(t, err)
+		require.Equal(t, int64(1), ctx.PoolStats().InUse)
+	}()
+
+	require.Eventually(t, func() bool {
+		runtime.GC()
+		return ctx.PoolStats().InUse == 0
+	}, 5*time.Second, 50*time.Millisecond, "the abandoned HMAC never gave its session back")
+
+	h, err := key.NewHMAC(pkcs11.CKM_SHA256_HMAC, 0)
+	require.NoError(t, err)
+	_, err = h.Write([]byte("message"))
+	require.NoError(t, err)
+	require.Len(t, h.Sum(nil), 32)
+}
+
+// TestHMACWriteAfterSumFailsClosed checks that data written after Sum, which
+// the finished token operation cannot take, makes the next Sum panic instead of
+// returning the MAC of the earlier data as if it covered the new data too.
+func TestHMACWriteAfterSumFailsClosed(t *testing.T) {
+	ctx := testContext(t)
+	skipIfMechUnsupported(t, ctx, pkcs11.CKM_SHA256_HMAC)
+	key, found, err := findKeyOrCreate(ctx, "hmac0", pkcs11.CKK_SHA256_HMAC, 256)
+	require.NoError(t, err)
+	if !found {
+		defer key.Delete()
+	}
+
+	h, err := key.NewHMAC(pkcs11.CKM_SHA256_HMAC, 0)
+	require.NoError(t, err)
+	_, err = h.Write([]byte("header"))
+	require.NoError(t, err)
+	header := h.Sum(nil)
+	require.Equal(t, header, h.Sum(nil), "Sum without new data repeats the MAC")
+	_, err = h.Write(nil)
+	require.NoError(t, err, "an empty Write after Sum adds nothing")
+	require.Equal(t, header, h.Sum(nil))
+
+	_, err = h.Write([]byte("body"))
+	require.ErrorIs(t, err, errHmacClosed)
+	require.Panics(t, func() { h.Sum(nil) }, "Sum returned the MAC of the header alone")
+
+	h.Reset()
+	_, err = h.Write([]byte("header"))
+	require.NoError(t, err)
+	require.Equal(t, header, h.Sum(nil), "Reset makes the hash usable again")
 }

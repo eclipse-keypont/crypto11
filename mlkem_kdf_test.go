@@ -112,3 +112,14 @@ func TestAbsorbKeyMatchesBytepad(t *testing.T) {
 		}
 	}
 }
+
+// TestMLKEMDeriveKeyRefusesWrongSecretLength checks that a shared secret of any length but the
+// 32 bytes FIPS 203 defines is refused: an empty one would derive a key anyone can compute.
+func TestMLKEMDeriveKeyRefusesWrongSecretLength(t *testing.T) {
+	for _, n := range []int{0, 16, 31, 33, 64} {
+		_, err := MLKEMDeriveKey(MLKEM768, make([]byte, n))
+		require.ErrorIs(t, err, errMLKEMSharedSecretLength, "%d bytes", n)
+	}
+	_, err := MLKEMDeriveKey(MLKEM768, make([]byte, 32))
+	require.NoError(t, err)
+}

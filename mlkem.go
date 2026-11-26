@@ -153,7 +153,7 @@ func (k *pkcs11MLKEMEncapsulatorKey) Encapsulate(sharedSecretAttrs AttributeSet)
 		return nil, nil, fmt.Errorf("unsupported key type")
 	}
 
-	ciphertext, ss, err := encapsulateMLKEM(k.context, k.handle, sharedSecretAttrs)
+	ciphertext, ss, err := encapsulateMLKEM(k.context, k.handle, 0, sharedSecretAttrs)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -197,12 +197,12 @@ func (k *pkcs11MLKEMKeyPair) ParameterSet() MLKEMParameterSet {
 // Encapsulate performs ML-KEM encapsulation using the public key (PKCS#11 v3.2 C_EncapsulateKey).
 // sharedSecretAttrs must describe the desired derived key (e.g. CKK_AES, CKA_VALUE_LEN = 32).
 func (k *pkcs11MLKEMKeyPair) Encapsulate(sharedSecretAttrs AttributeSet) ([]byte, *MLKEMSharedSecret, error) {
-	return encapsulateMLKEM(k.context, k.pubKeyHandle, sharedSecretAttrs)
+	return encapsulateMLKEM(k.context, k.pubKeyHandle, k.paramSet, sharedSecretAttrs)
 }
 
 // encapsulateMLKEM is shared by both Encapsulate entry points so they apply
 // the same shared-secret template defaults.
-func encapsulateMLKEM(context *Context, pubKeyHandle pkcs11.ObjectHandle, sharedSecretAttrs AttributeSet) ([]byte, *MLKEMSharedSecret, error) {
+func encapsulateMLKEM(context *Context, pubKeyHandle pkcs11.ObjectHandle, paramSet MLKEMParameterSet, sharedSecretAttrs AttributeSet) ([]byte, *MLKEMSharedSecret, error) {
 	var ciphertext []byte
 	var ss *MLKEMSharedSecret
 	err := context.withSession(func(session *pkcs11Session) error {
@@ -210,6 +210,10 @@ func encapsulateMLKEM(context *Context, pubKeyHandle pkcs11.ObjectHandle, shared
 		ct, ssHandle, err := session.ctx.EncapsulateKey(
 			session.handle, mech, pubKeyHandle, context.sharedSecretTemplate(sharedSecretAttrs))
 		if err != nil {
+			return err
+		}
+		if err := checkMLKEMCiphertext(paramSet, ct); err != nil {
+			_ = session.ctx.DestroyObject(session.handle, ssHandle)
 			return err
 		}
 		ciphertext = ct
@@ -220,8 +224,14 @@ func encapsulateMLKEM(context *Context, pubKeyHandle pkcs11.ObjectHandle, shared
 }
 
 // Decapsulate performs ML-KEM decapsulation using the private key (PKCS#11 v3.2 C_DecapsulateKey).
-// sharedSecretAttrs should match the template used during encapsulation.
+// sharedSecretAttrs should match the template used during encapsulation. A ciphertext whose length
+// is not the one the key's parameter set fixes is refused before it reaches the token, where some
+// modules answer it with CKR_GENERAL_ERROR, which costs the pooled session and any session
+// objects on it.
 func (k *pkcs11MLKEMKeyPair) Decapsulate(ciphertext []byte, sharedSecretAttrs AttributeSet) (*MLKEMSharedSecret, error) {
+	if err := checkMLKEMCiphertext(k.paramSet, ciphertext); err != nil {
+		return nil, err
+	}
 	var ss *MLKEMSharedSecret
 	err := k.context.withSession(func(session *pkcs11Session) error {
 		mech := pkcs11.NewMechanism(pkcs11.CKM_ML_KEM, nil)
@@ -278,6 +288,33 @@ func (c *Context) GenerateMLKEMKeyPairWithLabel(id, label []byte, paramSet MLKEM
 	return c.GenerateMLKEMKeyPairWithAttributes(public, private, paramSet)
 }
 
+// errMLKEMCiphertextLength is returned for an ML-KEM ciphertext whose length is not the one
+// FIPS 203 fixes for the key's parameter set.
+var errMLKEMCiphertextLength = errors.New("crypto11: ML-KEM ciphertext has the wrong length for the key's parameter set")
+
+// mlkemCiphertextSize returns the ciphertext length FIPS 203 fixes for parameter set p, and
+// false for a parameter set it does not define.
+func mlkemCiphertextSize(p MLKEMParameterSet) (int, bool) {
+	switch p {
+	case MLKEM512:
+		return 768, true
+	case MLKEM768:
+		return 1088, true
+	case MLKEM1024:
+		return 1568, true
+	}
+	return 0, false
+}
+
+// checkMLKEMCiphertext checks that ciphertext has the length the key's parameter set fixes. A key
+// whose parameter set is unknown is left to the token.
+func checkMLKEMCiphertext(paramSet MLKEMParameterSet, ciphertext []byte) error {
+	if size, ok := mlkemCiphertextSize(paramSet); ok && len(ciphertext) != size {
+		return fmt.Errorf("%w: %d bytes, want %d", errMLKEMCiphertextLength, len(ciphertext), size)
+	}
+	return nil
+}
+
 // validMLKEMParameterSet reports whether p is one of the three FIPS 203 levels.
 func validMLKEMParameterSet(p MLKEMParameterSet) bool {
 	return p == MLKEM512 || p == MLKEM768 || p == MLKEM1024
@@ -310,7 +347,7 @@ func (c *Context) GenerateMLKEMKeyPairWithAttributes(public, private AttributeSe
 	// from the private template even when the caller supplied it.
 	private.Unset(pkcs11.CKA_PARAMETER_SET)
 	var k MLKEMKeyPair
-	err := c.withSession(func(session *pkcs11Session) error {
+	err := c.withObjectSession([]AttributeSet{public, private}, func(session *pkcs11Session) error {
 		public.AddIfNotPresent([]*pkcs11.Attribute{
 			pkcs11.NewAttribute(pkcs11.CKA_CLASS, pkcs11.CKO_PUBLIC_KEY),
 			pkcs11.NewAttribute(pkcs11.CKA_KEY_TYPE, pkcs11.CKK_ML_KEM),
@@ -514,10 +551,7 @@ func (c *Context) FindMLKEMKeyPair(id, label []byte) (MLKEMKeyPair, error) {
 	if err != nil {
 		return nil, err
 	}
-	if len(result) == 0 {
-		return nil, fmt.Errorf("ML-KEM key pair with id=%x and label=%x was not found", id, label)
-	}
-	return result[0], nil
+	return onlyMatch(result, fmt.Sprintf("ML-KEM key pair with id=%x and label=%x", id, label))
 }
 
 // FindMLKEMKeyPairs retrieves all matching ML-KEM key pairs, or a nil slice if none can be found.
@@ -561,6 +595,9 @@ func (c *Context) FindMLKEMKeyPairsWithAttributes(attributes AttributeSet) ([]ML
 			return err
 		}
 		if err := privAttrs.Set(pkcs11.CKA_KEY_TYPE, pkcs11.CKK_ML_KEM); err != nil {
+			return err
+		}
+		if err := c.requirePrivateObject(privAttrs); err != nil {
 			return err
 		}
 

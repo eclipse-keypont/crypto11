@@ -231,7 +231,7 @@ func (c *Context) GenerateECDSAKeyPairWithAttributes(public, private AttributeSe
 	}
 
 	var k Signer
-	err := c.withSession(func(session *pkcs11Session) error {
+	err := c.withObjectSession([]AttributeSet{public, private}, func(session *pkcs11Session) error {
 
 		parameters, err := marshalEcParams(curve)
 		if err != nil {
@@ -305,5 +305,30 @@ func (c *Context) GenerateECDSAKeyPairWithAttributes(public, private AttributeSe
 //
 // The return value is a DER-encoded byteblock.
 func (signer *pkcs11PrivateKeyECDSA) Sign(_ io.Reader, digest []byte, _ crypto.SignerOpts) ([]byte, error) {
-	return signer.context.dsaGeneric(signer.handle, pkcs11.CKM_ECDSA, digest)
+	signature, err := signer.context.dsaGeneric(signer.handle, pkcs11.CKM_ECDSA, digest)
+	if err != nil {
+		return nil, err
+	}
+	if err := checkECDSASignature(signer.verificationKey(), digest, signature); err != nil {
+		return nil, err
+	}
+	return signature, nil
+}
+
+// errSignatureCheck is returned when an ECDSA or Ed25519 signature the token produced does not
+// verify under the key's public half.
+var errSignatureCheck = errors.New("crypto11: signature from the token does not verify; it was not returned")
+
+// checkECDSASignature verifies a DER signature the token returned before it is released, as
+// checkRSASignature does for RSA: a signature computed with a fault can reveal the private key.
+// A key whose public half is unknown is not checked.
+func checkECDSASignature(pub crypto.PublicKey, digest, signature []byte) error {
+	epub, ok := pub.(*ecdsa.PublicKey)
+	if !ok || epub == nil || epub.Curve == nil {
+		return nil
+	}
+	if !ecdsa.VerifyASN1(epub, digest, signature) {
+		return errSignatureCheck
+	}
+	return nil
 }

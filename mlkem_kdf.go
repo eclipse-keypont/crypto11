@@ -6,6 +6,7 @@ package crypto11
 
 import (
 	"crypto/sha3"
+	"errors"
 	"fmt"
 	"runtime"
 )
@@ -41,7 +42,28 @@ var mlkemAlgorithmID = map[MLKEMParameterSet]string{
 //   - X (data):       be32(len(alg)) || alg || be32(outputLen*8)  — AlgorithmID || SuppPubInfo
 //   - L (outputLen):  key size in bytes (16 or 32), from mlkemCekSize
 //   - S (customization): empty string
+//
+// The shared secret must be the 32 bytes FIPS 203 defines. Any other length is refused: an empty
+// secret, from a token that did not return its value for instance, would derive a fixed key
+// anyone can compute.
 func MLKEMDeriveKey(paramSet MLKEMParameterSet, sharedSecret []byte) ([]byte, error) {
+	if len(sharedSecret) != mlkemSharedSecretSize {
+		return nil, fmt.Errorf("%w: %d bytes, want %d", errMLKEMSharedSecretLength, len(sharedSecret), mlkemSharedSecretSize)
+	}
+	return mlkemDeriveKey(paramSet, sharedSecret)
+}
+
+// mlkemSharedSecretSize is the length of an ML-KEM shared secret for every parameter set
+// (FIPS 203).
+const mlkemSharedSecretSize = 32
+
+// errMLKEMSharedSecretLength is returned by MLKEMDeriveKey for a shared secret that is not
+// mlkemSharedSecretSize bytes long.
+var errMLKEMSharedSecretLength = errors.New("crypto11: ML-KEM shared secret has the wrong length")
+
+// mlkemDeriveKey is MLKEMDeriveKey without the shared-secret length check, so that the KDF
+// itself can be fuzzed with secrets of every length.
+func mlkemDeriveKey(paramSet MLKEMParameterSet, sharedSecret []byte) ([]byte, error) {
 	outputLen, ok := mlkemCekSize[paramSet]
 	if !ok {
 		return nil, fmt.Errorf("crypto11: unsupported ML-KEM parameter set %d", paramSet)
