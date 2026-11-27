@@ -271,6 +271,8 @@ func exportPublicKey(session *pkcs11Session, pubHandle pkcs11.ObjectHandle, keyT
 		return exportECDSAPublicKey(session, pubHandle)
 	case pkcs11.CKK_EC_EDWARDS:
 		return exportEd25519PublicKey(session, pubHandle)
+	case pkcs11.CKK_ML_DSA:
+		return exportMLDSAPublicKey(session, pubHandle)
 	default:
 		return nil, fmt.Errorf("%w: %X", errUnsupportedKeyType, keyType)
 	}
